@@ -1,0 +1,44 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cnpg-i-chronicle
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - barmancloud.cnpg.io
+  resources:
+  - objectstores
+  verbs:
+  - get
+- apiGroups:
+  - chronicle.sharifmshaker.github.io
+  resources:
+  - configstores
+  - restorepolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - chronicle.sharifmshaker.github.io
+  resources:
+  - configstores/status
+  - restorepolicies/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  verbs:
+  - get
+  - list

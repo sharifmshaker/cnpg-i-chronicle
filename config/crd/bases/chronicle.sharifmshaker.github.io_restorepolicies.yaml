@@ -1,0 +1,319 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: restorepolicies.chronicle.sharifmshaker.github.io
+spec:
+  group: chronicle.sharifmshaker.github.io
+  names:
+    kind: RestorePolicy
+    listKind: RestorePolicyList
+    plural: restorepolicies
+    shortNames:
+    - mdrestore
+    - mdrestores
+    singular: restorepolicy
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.select.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          RestorePolicy describes how a new Cluster inherits configuration from
+          another cluster's captured history.
+
+          It is consumed only at Cluster creation, by this plugin's mutating admission
+          webhook. Editing it afterwards does not re-restore anything.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RestorePolicySpec describes what to restore and what to leave
+              alone.
+            properties:
+              select:
+                description: |-
+                  Select picks one snapshot from the history being restored.
+
+                  Unset means AlignWithRecoveryTarget when the Cluster bootstraps from a
+                  recovery, and Latest otherwise. That default exists because the two cases
+                  want opposite things: a cluster recovering data to last Tuesday wants the
+                  configuration from last Tuesday, and a cluster starting fresh wants the
+                  newest. Getting it wrong is silent, so it is not left to be configured.
+
+                  Note that Generation and Timestamp name a coordinate rather than a rule,
+                  so a policy using either is meaningful for one history only. Latest and
+                  AlignWithRecoveryTarget are rules and travel anywhere.
+                properties:
+                  generation:
+                    description: |-
+                      Generation selects the snapshot captured at this exact Cluster
+                      generation. Used when mode is Generation.
+                    format: int64
+                    type: integer
+                  mode:
+                    default: Latest
+                    description: Mode is how the snapshot is chosen.
+                    enum:
+                    - Latest
+                    - Generation
+                    - Timestamp
+                    - AlignWithRecoveryTarget
+                    type: string
+                  onUnresolvable:
+                    default: Fail
+                    description: |-
+                      OnUnresolvable is what to do when mode is AlignWithRecoveryTarget but the
+                      target cannot be mapped to a moment — recoveryTarget.targetXID,
+                      targetLSN, targetName and targetImmediate say nothing about wall-clock
+                      time without replaying WAL.
+
+                      Fail is the default because the alternative is a cluster whose data and
+                      configuration silently disagree.
+                    enum:
+                    - Fail
+                    - UseLatest
+                    type: string
+                  timestamp:
+                    description: |-
+                      Timestamp selects the newest snapshot captured at or before this time.
+                      Used when mode is Timestamp.
+                    format: date-time
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: select.generation is required when mode is Generation
+                  rule: self.mode != 'Generation' || has(self.generation)
+                - message: select.timestamp is required when mode is Timestamp
+                  rule: self.mode != 'Timestamp' || has(self.timestamp)
+              skip:
+                description: |-
+                  Skip excludes parts of the snapshot. Anything skipped keeps whatever the
+                  Cluster manifest specified, or the operator's default.
+                items:
+                  description: "SkipRule excludes part of a snapshot from being restored.\n\nA
+                    rule names either a capture group or a path, never both. A path
+                    skips\nitself and everything beneath it, so \"skip every GUC\"
+                    is\n`spec.postgresql.parameters` while skipping one is\n`spec.postgresql.parameters.work_mem`.
+                    A trailing \".*\" is accepted and\nchanges nothing.\n\nA path
+                    naming a key inside a map matches that key exactly. Label keys
+                    and\nGUC names may themselves contain dots, so `metadata.annotations.example`\nskips
+                    an annotation named \"example\" and leaves \"example.com/owner\"
+                    alone.\n\nWhen the path names a map itself — metadata.labels,
+                    metadata.annotations,\nspec.postgresql.parameters and the like
+                    — KeyPrefix and Except narrow the\nrule to some of its keys:\n\n\t#
+                    No labels at all.\n\t- path: metadata.labels\n\n\t# Only these
+                    annotations.\n\t- path: metadata.annotations\n\t  except: [example.com/owner,
+                    team]\n\n\t# Every annotation Argo CD owns.\n\t- path: metadata.annotations\n\t
+                    \ keyPrefix: argocd.argoproj.io/\n\nEach rule removes a set of
+                    keys, and Except exempts keys from that rule\nonly. When several
+                    rules apply, everything any of them removes is skipped."
+                  properties:
+                    except:
+                      description: |-
+                        Except lists keys of the map this rule leaves alone, each matched as a
+                        whole key.
+                      items:
+                        minLength: 1
+                        type: string
+                      type: array
+                      x-kubernetes-list-type: set
+                    group:
+                      description: Group is a capture group name, such as Resources
+                        or Storage.
+                      type: string
+                    keyPrefix:
+                      description: |-
+                        KeyPrefix narrows a rule on a map to the keys starting with this string,
+                        matched against the whole key: `argocd.argoproj.io/` matches
+                        `argocd.argoproj.io/tracking-id`.
+                      minLength: 1
+                      type: string
+                    path:
+                      description: Path is a dotted path into the Cluster.
+                      type: string
+                  type: object
+                  x-kubernetes-validations:
+                  - message: a skip rule sets either group or path, not both
+                    rule: has(self.group) != has(self.path)
+                  - message: keyPrefix and except apply to a path naming a map, not
+                      to a group
+                    rule: '!has(self.group) || (!has(self.keyPrefix) && !has(self.except))'
+                type: array
+              transform:
+                description: |-
+                  Transform rewrites captured values as they are restored, so a cluster can
+                  inherit production's shape without inheriting its size.
+                items:
+                  description: "TransformRule adjusts a captured value on its way
+                    into the restored Cluster.\n\nThe expression is CEL, the same
+                    language Kubernetes uses for CRD validation\nrules. `old` is bound
+                    to the captured value, typed by its path: a quantity\nwhere CloudNativePG
+                    holds a resource quantity or a storage size, an integer\nfor an
+                    integer field or a string holding a whole number, a double for
+                    a\nstring holding a decimal, and a plain string for anything else.
+                    The result is\nwritten back in the captured value's own type.\n\n\tspec.storage.size
+                    \                            old.multiply(5)\n\tspec.instances
+                    \                               old > 3 ? 3 : old\n\tspec.resources.limits.memory
+                    \                 old.divide(2)\n\tspec.postgresql.parameters.shared_buffers
+                    \    pgScale(old, 2)\n\tspec.postgresql.parameters.max_connections
+                    \   old * 2\n\nSizes use member calls rather than `old * 5` because
+                    cel-go binds arithmetic\noperators as singletons and will not
+                    accept overloads for a custom type.\nPlain integers take the operators
+                    directly.\n\nPostgreSQL memory settings are deliberately not treated
+                    as Kubernetes\nquantities: PostgreSQL's MB is binary while Kubernetes'
+                    M is decimal, so\npgScale and pgMem exist for those."
+                  properties:
+                    expression:
+                      description: |-
+                        Expression is the CEL expression, evaluated with `old` bound to the captured
+                        value.
+
+                        The length bound is the real defence against an expensive expression.
+                        Evaluation is compiled with a cost limit, but with `old` a single scalar
+                        and no comprehensions in the environment, cost stays linear in the size of
+                        the expression — so bounding the input is what bounds the work, and it
+                        does so at the API server before the admission webhook is ever reached.
+                        Real transforms are well under a hundred characters.
+                      maxLength: 2048
+                      minLength: 1
+                      type: string
+                    onMissing:
+                      default: Fail
+                      description: |-
+                        OnMissing is what to do when the snapshot holds no value at this path.
+
+                        Fail, the default, because absence is usually a mistake this cannot tell
+                        apart from a real one. Path spelling is checked against the capture
+                        allowlist and CloudNativePG's types when the policy is applied, but that
+                        check stops at a map — a mistyped GUC name or annotation key looks exactly
+                        like a field the source cluster never set, and silently restoring
+                        production's shared_buffers is worse than refusing the cluster.
+
+                        Ignore is for a path that is legitimately absent from some histories.
+                        Capture groups gain paths as CloudNativePG gains fields, and snapshots are
+                        kept far longer than that takes, so a transform that is correct today can
+                        name something a snapshot from last year never carried — which is most
+                        likely to bite during an AlignWithRecoveryTarget restore, where the whole
+                        point is to reach for an old one.
+
+                        It covers absence only. A path that is also skipped, or that names an
+                        object whose values would restore untransformed, still fails: neither is
+                        missing, and both mean the rule does not do what it says.
+                      enum:
+                      - Fail
+                      - Ignore
+                      type: string
+                    path:
+                      description: |-
+                        Path is the dotted path whose value the expression rewrites. It must name
+                        a value the snapshot actually captured, and must not also be skipped.
+                      minLength: 1
+                      type: string
+                  required:
+                  - expression
+                  - path
+                  type: object
+                type: array
+            type: object
+          status:
+            description: |-
+              RestorePolicyStatus reports whether the policy's rules are usable.
+
+              There is nothing here about snapshots or stores. A policy names no source —
+              which history it is applied to is decided by the Cluster being created — so
+              everything this controller can say is a property of the rules alone.
+            properties:
+              conditions:
+                description: Conditions represent the latest available observations.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
