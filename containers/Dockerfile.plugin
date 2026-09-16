@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+
+# Requires BuildKit (docker buildx). The cache mounts are what make iteration
+# bearable: every build otherwise runs in a fresh container with no Go build
+# cache, so the whole dependency graph — cel-go, controller-runtime, the
+# Kubernetes libraries — recompiles from source each time. Only the module
+# download is a cached layer, and that is not where the time goes.
+FROM golang:1.26 AS builder
+WORKDIR /workspace
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY cmd/ cmd/
+COPY api/ api/
+COPY internal/ internal/
+
+ARG TARGETOS
+ARG TARGETARCH
+# No -a: CGO_ENABLED=0 already produces a static binary, and -a would defeat the
+# build cache mounted below.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w" -o manager ./cmd/manager
+
+FROM registry.access.redhat.com/ubi9/ubi-micro:latest
+WORKDIR /
+COPY --from=builder /workspace/manager /manager
+USER 65532:65532
+ENTRYPOINT ["/manager"]
