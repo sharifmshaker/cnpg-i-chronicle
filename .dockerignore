@@ -1,0 +1,8 @@
+bin/
+.git/
+manifest.yaml
+*.md
+hack/examples/
+config/
+kubernetes/
+containers/

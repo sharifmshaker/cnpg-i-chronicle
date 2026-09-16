@@ -1,0 +1,4 @@
+bin/
+manifest.yaml
+*.test
+cover.out
