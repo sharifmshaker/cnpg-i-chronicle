@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: chronicle
+  namespace: cnpg-system
+  labels:
+    app: chronicle
+    # CloudNativePG discovers plugins by watching Services in its own namespace.
+    # This label carries the plugin name and must match both
+    # GetPluginMetadata().name and the name used in a Cluster's .spec.plugins[].
+    cnpg.io/pluginName: chronicle.sharifmshaker.github.io
+  annotations:
+    # All three annotations are mandatory. A Service missing any one of them is
+    # silently invisible to the operator (see isPluginService), which surfaces
+    # only as a Cluster stuck in PhaseUnknownPlugin.
+    cnpg.io/pluginClientSecret: chronicle-client-tls
+    cnpg.io/pluginServerSecret: chronicle-server-tls
+    cnpg.io/pluginPort: "9090"
+spec:
+  selector:
+    app: chronicle
+  ports:
+    - name: grpc
+      port: 9090
+      protocol: TCP
+      targetPort: 9090
+    # The restore webhook is served by the same process. CNPG-I's create-time
+    # hook (Operator.MutateCluster) has had no caller in the operator since
+    # remote plugin support landed, so restore runs through ordinary admission.
+    - name: webhook
+      port: 9443
+      protocol: TCP
+      targetPort: 9443

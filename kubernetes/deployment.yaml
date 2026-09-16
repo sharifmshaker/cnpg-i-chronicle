@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronicle
+  namespace: cnpg-system
+  labels:
+    app: chronicle
+spec:
+  replicas: 1
+
+  # RollingUpdate with maxUnavailable: 0, so the incoming pod is serving before
+  # the outgoing one stops. Recreate would tear down the old pod first, and the
+  # restore webhook is registered failurePolicy: Fail, so that gap would block
+  # creation of any cluster using restoreFrom.
+  #
+  # Two pods briefly coexist during the update, and that is safe without a
+  # lease. Admission and the gRPC hooks are request-scoped and stateless, and
+  # the hooks have exactly one caller — the CloudNativePG operator, which is
+  # itself leader-elected. The two status controllers may both patch a status
+  # for a few seconds, but each writes a pure function of the spec, so the
+  # overlap writes the same bytes twice and is wasteful at worst.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  selector:
+    matchLabels:
+      app: chronicle
+  template:
+    metadata:
+      labels:
+        app: chronicle
+    spec:
+      serviceAccountName: chronicle
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - operator: Exists
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: chronicle
+          image: ghcr.io/sharifmshaker/cnpg-i-chronicle:dev
+          imagePullPolicy: IfNotPresent
+          args:
+            - operator
+            - --server-cert=/server/tls.crt
+            - --server-key=/server/tls.key
+            - --client-cert=/client/tls.crt
+            - --server-address=:9090
+            # No --leader-elect.
+            #
+            # Nothing here depends on a lease for correctness (see the strategy
+            # comment above), and enabling one would add a failure path: a
+            # renewal missed under load makes the manager return "leader
+            # election lost", which exits the process and takes the restore
+            # webhook down with it.
+            #
+            # The flag still exists. If this is ever scaled past one replica
+            # for long, turn it on so the status controllers run once; the gRPC
+            # server and the webhook opt out of it explicitly and keep serving
+            # on every replica.
+          ports:
+            - name: grpc
+              containerPort: 9090
+            - name: webhook
+              containerPort: 9443
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: server
+              mountPath: /server
+              readOnly: true
+            - name: client
+              mountPath: /client
+              readOnly: true
+      volumes:
+        - name: server
+          secret:
+            secretName: chronicle-server-tls
+        - name: client
+          secret:
+            secretName: chronicle-client-tls

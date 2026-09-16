@@ -1,0 +1,25 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: chronicle-server
+  namespace: cnpg-system
+spec:
+  secretName: chronicle-server-tls
+  # The operator verifies this certificate against the Service name unless the
+  # cnpg.io/pluginServerName annotation says otherwise, so the SANs must cover
+  # the Service's in-cluster DNS names.
+  commonName: chronicle
+  dnsNames:
+    - chronicle
+    - chronicle.cnpg-system
+    - chronicle.cnpg-system.svc
+    - chronicle.cnpg-system.svc.cluster.local
+  duration: 2160h    # 90d
+  renewBefore: 360h  # 15d
+  isCA: false
+  usages:
+    - server auth
+  issuerRef:
+    name: chronicle-selfsigned-issuer
+    kind: Issuer
+    group: cert-manager.io

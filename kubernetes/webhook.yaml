@@ -1,0 +1,55 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: chronicle-restore.sharifmshaker.github.io
+  annotations:
+    # cert-manager injects the CA bundle from the plugin's serving certificate,
+    # which is the same one the gRPC listener presents.
+    cert-manager.io/inject-ca-from: cnpg-system/chronicle-server
+webhooks:
+  - name: restore.chronicle.sharifmshaker.github.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    # Restore is applied once, when the Cluster is created. Editing a
+    # RestorePolicy afterwards does not re-restore anything.
+    rules:
+      - operations: ["CREATE"]
+        apiGroups: ["postgresql.cnpg.io"]
+        apiVersions: ["v1"]
+        resources: ["clusters"]
+        scope: Namespaced
+    matchPolicy: Equivalent
+
+    # Opt-in is the plugin configuration itself, evaluated by the API server
+    # rather than by our handler. A Cluster that does not ask for a restore
+    # never reaches this webhook at all, which is what makes failurePolicy Fail
+    # safe: it can only ever block creation of a cluster that explicitly
+    # requested a restore, which is exactly the cluster that must not come up
+    # with the wrong configuration.
+    #
+    # Requires Kubernetes >= 1.28, where matchConditions is on by default.
+    # Any restore-side parameter admits the cluster, not just the complete set.
+    # Keying only on the full triple would let a half-specified restore — a
+    # store with no server — slip past admission entirely and create a cluster
+    # with none of its configuration restored and nothing to say why.
+    matchConditions:
+      - name: uses-chronicle-restore
+        expression: >-
+          has(object.spec.plugins) &&
+          object.spec.plugins.exists(p,
+            p.name == "chronicle.sharifmshaker.github.io" &&
+            (!has(p.enabled) || p.enabled) &&
+            has(p.parameters) && (
+              "restoreFromStore" in p.parameters ||
+              "restoreFromServer" in p.parameters ||
+              "restorePolicy" in p.parameters))
+
+    failurePolicy: Fail
+    timeoutSeconds: 10
+
+    clientConfig:
+      service:
+        name: chronicle
+        namespace: cnpg-system
+        path: /mutate-postgresql-cnpg-io-v1-cluster
+        port: 9443
