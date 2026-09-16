@@ -1,0 +1,33 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    ':semanticCommitTypeAll(chore)',
+    ':automergeMinor',
+    ':automergeDigest',
+  ],
+  // A small project maintained a few hours a month. Batching keeps the PR
+  // volume to something reviewable rather than one PR per module bump.
+  schedule: ['before 6am on the first day of the month'],
+  packageRules: [
+    {
+      description: 'Go module updates travel together.',
+      matchManagers: ['gomod'],
+      groupName: 'go modules',
+    },
+    {
+      description: 'CloudNativePG APIs and the CNPG-I protocol gate compatibility. Review these by hand.',
+      matchPackageNames: [
+        'github.com/cloudnative-pg/**',
+      ],
+      groupName: 'cloudnative-pg',
+      automerge: false,
+    },
+    {
+      description: 'The Go toolchain in go.mod is a deliberate choice, not a dependency.',
+      matchManagers: ['gomod'],
+      matchDepTypes: ['golang'],
+      enabled: false,
+    },
+  ],
+}

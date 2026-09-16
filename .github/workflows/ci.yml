@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Format
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^bin/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would rewrite these files:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # The generated CRDs and RBAC are committed. Regenerating them here and
+      # failing on a dirty tree is what keeps them honest: a change to a
+      # kubebuilder marker that was never regenerated fails the build rather
+      # than shipping a CRD that does not match the Go types.
+      - name: Generated artifacts are current
+        run: |
+          make manifests generate
+          if ! git diff --exit-code; then
+            echo "::error::run 'make manifests generate' and commit the result"; exit 1
+          fi
+
+      # The suite is hermetic: no envtest, no network, no cluster. The S3
+      # integration tests are skipped unless CHRONICLE_S3_ENDPOINT is set.
+      - name: Test
+        run: go test ./... -race -count=1
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the plugin image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: containers/Dockerfile.plugin
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
