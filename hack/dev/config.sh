@@ -25,8 +25,7 @@ CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.21.1}"
 BARMAN_PLUGIN_VERSION="${BARMAN_PLUGIN_VERSION:-v0.14.0}"
 
 # --- object store ------------------------------------------------------------
-# rustfs (default) or seaweedfs. MinIO is deliberately absent: the project was
-# archived in 2026 and its last published image predates a known CVE.
+# rustfs (default) or seaweedfs; see "The object store" in docs/DEV-ENVIRONMENT.md.
 DEV_S3="${DEV_S3:-rustfs}"
 DEV_BUCKET="${DEV_BUCKET:-chronicle}"
 DEV_ACCESS_KEY="${DEV_ACCESS_KEY:-chronicle}"

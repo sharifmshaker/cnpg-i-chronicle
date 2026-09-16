@@ -1,10 +1,7 @@
 # RustFS — the dev environment's S3-compatible object store.
 #
-# Why RustFS and not MinIO: MinIO's community edition was archived during 2026
-# (minio/minio in April, minio/mc in July), its last published image predates
-# CVE-2025-62506, and the console was cut from the community build in May 2025.
-# RustFS is Apache-2.0, actively developed, and — the deciding factor — is what
-# cnpg-playground migrated to, so barman-cloud writing WAL and base backups into
+# Why RustFS: it is Apache-2.0, actively developed, and — the deciding factor —
+# what cnpg-playground uses, so barman-cloud writing WAL and base backups into
 # it is already exercised by the CloudNativePG project itself.
 #
 # RustFS has not cut a stable 1.0 yet. That is acceptable for a dev-only

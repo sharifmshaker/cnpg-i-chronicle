@@ -31,9 +31,9 @@ import (
 	"github.com/sharifmshaker/cnpg-i-chronicle/internal/pathutil"
 )
 
-// realisticCluster mirrors the shape of the cnpg-playground demo templates:
-// archiving configured through the barman plugin, a recovery external cluster,
-// real affinity, walSturage and resource limits.
+// realisticCluster is shaped like a production cluster: archiving configured
+// through the barman plugin, a recovery external cluster, real affinity,
+// walStorage and resource limits.
 func realisticCluster() *apiv1.Cluster {
 	return &apiv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{

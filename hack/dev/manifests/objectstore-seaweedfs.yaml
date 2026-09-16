@@ -1,10 +1,9 @@
 # SeaweedFS — the alternative object store, selected with DEV_S3=seaweedfs.
 #
 # It exists as a hedge. RustFS is the default because the CloudNativePG
-# playground uses it, but RustFS has no stable 1.0 yet. SeaweedFS is Apache-2.0,
-# cuts stable releases, and is the most actively maintained of the post-MinIO
-# options — so if a RustFS release candidate misbehaves, the environment moves
-# with one variable rather than a rewrite.
+# playground uses it, but RustFS has no stable 1.0 yet. SeaweedFS is Apache-2.0
+# and cuts stable releases, so if a RustFS release candidate misbehaves, the
+# environment moves with one variable rather than a rewrite.
 #
 # `weed server -s3` runs master, volume, filer and the S3 gateway in one
 # process, which is what makes this a single pod.

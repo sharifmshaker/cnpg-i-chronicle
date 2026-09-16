@@ -56,8 +56,8 @@ type ObjectStoreConfiguration struct {
 	// +kubebuilder:validation:Pattern=`^s3://.+`
 	DestinationPath string `json:"destinationPath"`
 
-	// EndpointURL points at an S3-compatible endpoint such as MinIO, RustFS or
-	// Ceph. Leave it unset for AWS S3 itself.
+	// EndpointURL points at a self-hosted S3-compatible endpoint, such as
+	// RustFS. Leave it unset for AWS S3 itself.
 	//
 	// Setting it also switches the client to path-style addressing, which
 	// self-hosted endpoints require: virtual-host addressing needs per-bucket

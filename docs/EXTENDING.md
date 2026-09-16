@@ -102,9 +102,9 @@ The behaviours the rest of the plugin depends on:
 - **`Delete` of a missing key is not an error.** Pruning runs against stores that
   may be partially cleaned.
 - **`Put` should create the container if it is absent**, matching barman-cloud
-  and what `s3.go` does. Neither MinIO nor RustFS creates one implicitly, and a
-  first write that fails on a fresh bucket is a bad first experience. If the
-  create is denied, say so and name the container.
+  and what `s3.go` does. Self-hosted stores such as RustFS do not create one
+  implicitly, and a first write that fails on a fresh bucket is a bad first
+  experience. If the create is denied, say so and name the container.
 
 ## Testing it
 
@@ -119,13 +119,10 @@ shape works for a new backend: stand up the emulator, gate on its own
 environment variable, assert the behaviours above plus a full
 `SnapshotStore` round trip including checksum verification.
 
-Run it against a real server before believing it:
+Run it against a real server before believing it. With `make dev-up` running,
+its RustFS store is published on `localhost:19000`:
 
 ```bash
-docker run -d --name minio -p 19000:9000 \
-  -e MINIO_ROOT_USER=chronicle -e MINIO_ROOT_PASSWORD=chronicle123 \
-  quay.io/minio/minio:latest server /data
-
 CHRONICLE_S3_ENDPOINT=http://localhost:19000 \
 CHRONICLE_S3_ACCESS_KEY=chronicle CHRONICLE_S3_SECRET_KEY=chronicle123 \
   go test ./internal/store/ -run Integration -v

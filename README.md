@@ -19,9 +19,8 @@ affiliated with CloudNativePG or the Cloud Native Computing Foundation.
 ## Status
 
 **Alpha.** All four phases work and are verified end to end against a real
-CloudNativePG operator with both RustFS and MinIO, but this has not been run in
-production by anyone. It is maintained on a best-effort basis; there is no
-support commitment.
+CloudNativePG operator with RustFS, but this has not been run in production by
+anyone. It is maintained on a best-effort basis; there is no support commitment.
 
 | Phase | State |
 |---|---|
@@ -34,8 +33,9 @@ support commitment.
 `AlignWithRecoveryTarget`.
 
 Only `s3://` destinations are implemented, but that covers **any S3-compatible
-endpoint** — AWS S3, MinIO, RustFS, Ceph — because a custom `endpointURL`
-switches the client to path-style addressing, which self-hosted servers require.
+endpoint** — AWS S3 or a self-hosted store such as RustFS — because a custom
+`endpointURL` switches the client to path-style addressing, which self-hosted
+servers require.
 Azure and GCS return an explicit error rather than silently doing nothing.
 
 ## How it works
@@ -68,8 +68,9 @@ rules, even when the content comes out the same, instead of waiting for the
 next unrelated edit.
 
 The bucket is created on first write if it does not exist, matching
-barman-cloud, since neither MinIO nor RustFS creates one implicitly. If
-`s3:CreateBucket` is denied the error says so and names the bucket.
+barman-cloud, since self-hosted stores such as RustFS do not create one
+implicitly. If `s3:CreateBucket` is denied the error says so and names the
+bucket.
 
 **Restore** runs in the plugin's own mutating admission webhook at `CREATE`,
 scoped by a CEL `matchConditions` expression matching on the plugin being

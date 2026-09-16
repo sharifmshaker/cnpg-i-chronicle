@@ -1,8 +1,8 @@
 # An rclone pod inside the cluster, and a Job that creates the bucket.
 #
-# `mc` used to be the obvious tool here, but minio/mc was archived in July 2026.
-# rclone is the vendor-neutral replacement: MIT, actively maintained, and it
-# speaks to any S3 endpoint rather than to one vendor's server.
+# rclone rather than a store-specific client: MIT, actively maintained, and it
+# speaks to any S3 endpoint, so the same commands work whichever DEV_S3 is
+# running.
 #
 # The toolbox exists so the store can be inspected with nothing installed on the
 # host — kubectl exec is enough. Host-side rclone against localhost:19000 is the

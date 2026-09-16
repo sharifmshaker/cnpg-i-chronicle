@@ -30,11 +30,9 @@ import (
 )
 
 // These tests run against a real S3-compatible server. They are skipped unless
-// CHRONICLE_S3_ENDPOINT is set, so `go test ./...` stays hermetic:
+// CHRONICLE_S3_ENDPOINT is set, so `go test ./...` stays hermetic. With
+// `make dev-up` running, its RustFS store is published on localhost:19000:
 //
-//	docker run -d --name minio -p 19000:9000 \
-//	  -e MINIO_ROOT_USER=chronicle -e MINIO_ROOT_PASSWORD=chronicle123 \
-//	  quay.io/minio/minio:latest server /data
 //	CHRONICLE_S3_ENDPOINT=http://localhost:19000 \
 //	CHRONICLE_S3_ACCESS_KEY=chronicle \
 //	CHRONICLE_S3_SECRET_KEY=chronicle123 \
@@ -42,7 +40,7 @@ import (
 //	  go test ./internal/store/ -run Integration -v
 //
 // The same test is what proves the "any S3-compatible endpoint" claim: point it
-// at MinIO, RustFS or real S3 and the assertions do not change.
+// at a different store and the assertions do not change.
 func integrationBackend(t *testing.T) Backend {
 	t.Helper()
 

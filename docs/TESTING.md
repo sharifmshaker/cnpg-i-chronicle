@@ -1,46 +1,21 @@
-# Manual setup and testing
+# Manual testing
 
-How to stand up a cluster, deploy the plugin, and exercise every phase by hand.
+What to do, and what to expect, to exercise every phase of the plugin by hand.
 
-> **Most of the time you want `make dev-up` instead.** It provisions all of
-> this automatically — see [`DEV-ENVIRONMENT.md`](DEV-ENVIRONMENT.md). This
-> document is the manual procedure behind it: read it to understand a step, to
-> reproduce something in a topology the script does not expose, or to debug the
-> script itself.
+> **Start with `make dev-up`.** It provisions everything these procedures need —
+> see [`DEV-ENVIRONMENT.md`](DEV-ENVIRONMENT.md) — and every command below is
+> written against the environment it builds: the kind context
+> `kind-chronicle-dev`, the source cluster `pg-source`, the store `config-store`,
+> and a RustFS bucket named `chronicle`. The scenarios in `hack/dev/scenarios/`
+> demonstrate the same behaviour in one `kubectl apply` each; this document is
+> the checklist behind them.
 
 Everything below has been run end to end on macOS with colima. Where a step has
-a way of going wrong that is not obvious, the symptom is written next to it —
-several of these cost hours to diagnose the first time.
-
-## A note on MinIO
-
-Earlier revisions of this document used MinIO, and the commands below still
-reference it in places. **MinIO's community edition was archived during 2026** —
-`minio/minio` in April, `minio/mc` in July — and its last published image
-(September 2025) predates CVE-2025-62506, which was fixed only in source.
-
-Do not start new work against it. The automated environment uses **RustFS** by
-default (what cnpg-playground migrated to) with **SeaweedFS** as a one-variable
-alternative, and **rclone** in place of `mc`. Where a MinIO command appears
-below, the rclone equivalent is:
-
-```bash
-# was: mc alias set s <endpoint> <key> <secret> && mc ls --recursive s/<bucket>/
-rclone --s3-provider Other --s3-endpoint <endpoint> \
-  --s3-access-key-id <key> --s3-secret-access-key <secret> \
-  --s3-force-path-style ls :s3:<bucket>/
-```
-
-Or, against the dev environment, simply:
-
-```bash
-eval $(./hack/dev/env.sh) && rclone tree dev:chronicle
-```
+a way of going wrong that is not obvious, the symptom is written next to it.
 
 - [Prerequisites](#prerequisites)
-- [Environment](#environment)
-- [Object store](#object-store)
-- [Deploying the plugin](#deploying-the-plugin)
+- [Assembling the environment by hand](#assembling-the-environment-by-hand)
+- [Inspecting the bucket](#inspecting-the-bucket)
 - [Test procedures](#test-procedures)
 - [Troubleshooting](#troubleshooting)
 - [Teardown](#teardown)
@@ -51,12 +26,12 @@ eval $(./hack/dev/env.sh) && rclone tree dev:chronicle
 
 | Tool | Why | Install |
 |---|---|---|
-| `docker` (or podman) | runs the kind nodes and the object store | — |
+| `docker` | runs the kind node and builds the image | — |
 | `docker buildx` | **required** to build the image; see note below | `brew install docker-buildx` |
 | `kind` | the Kubernetes cluster | `brew install kind` |
 | `kubectl` | everything | `brew install kubectl` |
-| `kubectl cnpg` | `demo/setup.sh` calls it | `brew install kubectl-cnpg` |
-| `cmctl` | `demo/setup.sh` waits on cert-manager with it | `brew install cmctl` |
+| `rclone` | reading the bucket from the host | `brew install rclone` |
+| `jq` | reading snapshots and restore records | `brew install jq` |
 | `go` 1.26+ | tests, code generation | — |
 
 `docker buildx` also needs registering as a CLI plugin on macOS, or `docker
@@ -73,310 +48,137 @@ Without BuildKit, the Dockerfile's Go build-cache mounts are ignored and every
 image build recompiles cel-go, controller-runtime and the Kubernetes libraries
 from source in a fresh container: **11 minutes instead of 30 seconds.**
 
-### Raise the inotify limits first
-
-Do this before creating any cluster. It is the single highest-value step here.
-
-```bash
-colima ssh -- sudo sysctl -w fs.inotify.max_user_instances=8192 \
-                              fs.inotify.max_user_watches=1048576
-```
-
-A six-node kind cluster exhausts the default `max_user_instances=128`.
-`kube-proxy` and CoreDNS then crash-loop with `too many open files`, which
-breaks Service ClusterIP routing **cluster-wide**. The symptom is not a
-networking error — it is every controller timing out on
-`https://10.96.0.1:443/api`, which looks like a broken operator. It does not
-survive a colima restart.
+Raise the inotify limits in the Docker VM before creating a cluster. A low limit
+makes kube-proxy crash-loop and breaks every ClusterIP, which looks nothing like
+its cause; [`DEV-ENVIRONMENT.md`](DEV-ENVIRONMENT.md#raise-the-inotify-limits-first)
+has the commands.
 
 ---
 
-## Environment
+## Assembling the environment by hand
 
-### Option A — cnpg-playground
-
-Realistic: multiple regions, tainted Postgres nodes across simulated zones, an
-S3-compatible store per region. Note it uses **RustFS**, not MinIO.
-
-```bash
-git clone https://github.com/cloudnative-pg/cnpg-playground
-cd cnpg-playground
-
-./scripts/setup.sh eu                      # one region is enough for phases 1-4
-export KUBECONFIG=$PWD/k8s/kube-config.yaml
-
-REQUIREMENTS_ONLY=true ./demo/setup.sh eu  # CNPG + cert-manager, no demo clusters
-```
-
-Pass the region explicitly. With no argument the script auto-detects using
-`mapfile`, which macOS's bash 3.2 does not have (`mapfile: command not found`).
-
-`REQUIREMENTS_ONLY=true` skips creating demo Postgres clusters, which is what
-you want when the thing under test is the plugin.
-
-The kind cluster is `k8s-eu`; the kubectl context is `kind-k8s-eu`. `kind load`
-wants the cluster name, `kubectl` wants the context — an easy hour to lose.
-
-### Connecting to a cluster that is already running
-
-The playground writes its kubeconfig into its own checkout rather than to
-`~/.kube/config`, so **every new shell needs the export**. Without it `kubectl`
-talks to whatever your default config points at, and the failure reads as if the
-cluster were down rather than as if you were pointed elsewhere.
+`make dev-up` does all of this, idempotently. Do it by hand when you need to
+vary a step, or to debug the script. Each step matches one in `hack/dev/up.sh`,
+and [`DEV-ENVIRONMENT.md`](DEV-ENVIRONMENT.md) explains why it is there.
 
 ```bash
-export KUBECONFIG=/absolute/path/to/cnpg-playground/k8s/kube-config.yaml
-kubectl config use-context kind-k8s-eu
-```
+kind create cluster --config hack/dev/kind.yaml --name chronicle-dev
 
-Use an absolute path. The setup snippet above writes `$PWD/k8s/kube-config.yaml`,
-which only resolves while you are standing in the playground directory.
-
-Confirm you are talking to the right thing:
-
-```bash
-kubectl config get-contexts          # kind-k8s-eu should be current
-kind get clusters                    # k8s-eu
-kubectl get nodes                    # 1 control-plane + 5 workers
-```
-
-Worth adding to your shell profile if you are iterating:
-
-```bash
-alias kpg='export KUBECONFIG=/absolute/path/to/cnpg-playground/k8s/kube-config.yaml'
-```
-
-To merge it into your default config instead of switching, so `kubectl` sees it
-everywhere:
-
-```bash
-KUBECONFIG=~/.kube/config:/absolute/path/to/cnpg-playground/k8s/kube-config.yaml \
-  kubectl config view --flatten > /tmp/merged && mv /tmp/merged ~/.kube/config
-kubectl config use-context kind-k8s-eu
-```
-
-Back up `~/.kube/config` first — `--flatten` rewrites the whole file, and the
-playground's `teardown.sh` prunes only its own entries from the file it created.
-
-For a plain kind cluster (Option B) none of this applies: `kind create cluster`
-writes to `~/.kube/config` and switches to it.
-
-### Option B — plain kind
-
-Lighter, if the multi-region topology is not what you are exercising.
-
-```bash
-kind create cluster --name k8s-eu
-kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.30/releases/cnpg-1.30.0.yaml
 kubectl apply --server-side -f \
   https://github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.yaml
-```
-
-Then create the object store yourself (see below) and attach it to the kind
-network.
-
-### Pod networking only works reliably on the control-plane node
-
-In the playground, the CNPG operator and cert-manager are pinned to the
-control-plane with a `nodeSelector` and a blanket toleration. Keep them there
-unless you have verified pod-to-apiserver routing from the workers. A pod on a
-worker that cannot reach `10.96.0.1:443` fails in a way that looks like a bug in
-whatever is running there.
-
-This plugin's manifest does not pin itself, because on a real cluster there may
-be no schedulable control-plane nodes at all. On the playground, pin it after
-deploying:
-
-```bash
-kubectl -n cnpg-system patch deployment chronicle --type=merge -p \
-  '{"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":""},"tolerations":[{"operator":"Exists"}]}}}}'
-```
-
----
-
-## Object store
-
-The plugin talks to **any S3-compatible endpoint**. A custom `endpointURL`
-switches the client to path-style addressing, which self-hosted servers require
-— virtual-host addressing needs per-bucket DNS they do not provide. Both stores
-below are verified end to end.
-
-The endpoint must be on the `kind` Docker network, or pods cannot reach it.
-
-### RustFS (what the playground provides)
-
-`./scripts/setup.sh` starts it and distributes credentials as a Secret named
-`objectstore-<region>` in the `default` namespace, keys `ACCESS_KEY_ID` and
-`ACCESS_SECRET_KEY`. Reachable in-cluster at `http://objectstore-eu:9000`; the
-console is on the host at `localhost:9001`.
-
-```yaml
-apiVersion: chronicle.sharifmshaker.github.io/v1
-kind: ConfigStore
-metadata:
-  name: config-store
-spec:
-  configuration:
-    destinationPath: s3://backups/
-    endpointURL: http://objectstore-eu:9000
-    s3Credentials:
-      accessKeyId:     {name: objectstore-eu, key: ACCESS_KEY_ID}
-      secretAccessKey: {name: objectstore-eu, key: ACCESS_SECRET_KEY}
-```
-
-### MinIO
-
-```bash
-docker run -d --name chronicle-minio \
-  -p 19000:9000 -p 19001:9001 \
-  -e MINIO_ROOT_USER=chronicle -e MINIO_ROOT_PASSWORD=chronicle123 \
-  quay.io/minio/minio:latest server /data --console-address ":9001"
-
-docker network connect kind chronicle-minio   # without this, pods cannot reach it
-
-kubectl create secret generic minio-creds \
-  --from-literal=ACCESS_KEY_ID=chronicle \
-  --from-literal=ACCESS_SECRET_KEY=chronicle123
-```
-
-```yaml
-apiVersion: chronicle.sharifmshaker.github.io/v1
-kind: ConfigStore
-metadata:
-  name: meta-minio
-spec:
-  configuration:
-    destinationPath: s3://chronicle-e2e/
-    endpointURL: http://chronicle-minio:9000
-    s3Credentials:
-      accessKeyId:     {name: minio-creds, key: ACCESS_KEY_ID}
-      secretAccessKey: {name: minio-creds, key: ACCESS_SECRET_KEY}
-```
-
-Neither RustFS nor MinIO creates a bucket implicitly, and creating one by
-`mkdir` in RustFS's data directory corrupts it. The plugin creates the bucket on
-first write, matching barman-cloud; if `s3:CreateBucket` is denied it says so
-and names the bucket.
-
-### Deriving from a barman ObjectStore
-
-To reuse a store already configured for backups, reference it instead of
-restating it:
-
-```yaml
-spec:
-  derivedFrom:
-    name: objectstore-eu     # barmancloud.cnpg.io/v1
-```
-
-Only `.spec.configuration` is read. The barman **CRD** must be installed, but
-the barman **plugin** need not be running — the CRD alone is enough:
-
-```bash
 kubectl apply --server-side -f \
-  https://raw.githubusercontent.com/cloudnative-pg/plugin-barman-cloud/v0.14.0/config/crd/bases/barmancloud.cnpg.io_objectstores.yaml
+  https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/main/releases/cnpg-1.30.0.yaml
+
+# Needed for derivedFrom and for WAL archiving; the standalone store works without it.
+kubectl apply --server-side -f \
+  https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.14.0/manifest.yaml
 ```
 
-### Inspecting the bucket
+Wait for cert-manager's webhook to have an endpoint before applying anything
+that creates a `Certificate`; until then every such apply is rejected.
 
-`mc` needs to be on the kind network too:
+The dev manifests use `${VAR}` placeholders, filled from `hack/dev/config.sh`.
+Render and apply them the way `up.sh` does:
 
 ```bash
-docker run --rm --network kind --entrypoint sh quay.io/minio/mc:latest -c \
-  "mc alias set s http://objectstore-eu:9000 cnpg Cl0udNativePGRocks >/dev/null &&
-   mc ls --recursive s/backups/"
+render() { ( . hack/dev/config.sh && . hack/dev/lib.sh && substitute < "$1" ); }
+
+render hack/dev/manifests/objectstore-rustfs.yaml | kubectl apply --server-side -f -
+render hack/dev/manifests/toolbox.yaml            | kubectl apply --server-side -f -   # rclone, and the bucket
 ```
 
----
-
-## Deploying the plugin
+Then the plugin:
 
 ```bash
 make docker-build            # ~30s warm, ~11m cold
-kind load docker-image ghcr.io/sharifmshaker/cnpg-i-chronicle:dev --name k8s-eu
+kind load docker-image ghcr.io/sharifmshaker/cnpg-i-chronicle:dev --name chronicle-dev
 make deploy
 kubectl -n cnpg-system rollout status deploy/chronicle
 ```
 
-### If `kind load` silently does nothing
-
-Under colima's containerd image store, both `kind load docker-image` and
-`docker cp` can report success and copy nothing. Pipe through `ctr` instead:
+And the stores and source cluster:
 
 ```bash
-docker save ghcr.io/sharifmshaker/cnpg-i-chronicle:dev -o /tmp/img.tar
-docker exec -i k8s-eu-control-plane \
-  ctr -n k8s.io images import --platform linux/arm64 - < /tmp/img.tar
+render hack/dev/manifests/stores.yaml  | kubectl apply --server-side -f -
+render hack/dev/manifests/cluster.yaml | kubectl apply --server-side -f -
+```
 
-docker exec k8s-eu-control-plane crictl images | grep chronicle   # confirm
+### If `kind load` silently does nothing
+
+Under colima's containerd image store, `kind load docker-image` can report
+success and copy nothing. The symptom is `ImagePullBackOff` for an image you can
+see in `docker images`. Stream it in instead:
+
+```bash
+docker save ghcr.io/sharifmshaker/cnpg-i-chronicle:dev \
+  | docker exec -i chronicle-dev-control-plane ctr --namespace k8s.io images import -
+
+docker exec chronicle-dev-control-plane crictl images | grep chronicle   # confirm
 ```
 
 ### Health check
 
 ```bash
-kubectl -n cnpg-system logs -l app=chronicle --tail=20 | grep -oE '"msg":"[^"]*"'
+kubectl -n cnpg-system logs deploy/chronicle --tail=20 | grep -oE '"msg":"[^"]*"'
+kubectl get configstore
 ```
 
 Expected on startup: `Registering webhook`, `Starting webhook server`,
 `Starting plugin listener`, `Serving webhook server`, `Starting Controller`.
+`config-store` should report `READY True`, which means its credentials were read
+and the bucket answered a listing.
 
 There is **no** leader-election step — the plugin does not use one. The
 comments in `kubernetes/deployment.yaml` say why.
 
 ---
 
+## Inspecting the bucket
+
+The dev store is published on `localhost:19000`. Point rclone at it once per
+shell:
+
+```bash
+eval $(./hack/dev/env.sh)
+
+rclone tree dev:chronicle                                   # everything
+rclone ls   dev:chronicle/pg-source/chronicle/snapshots/    # snapshots
+rclone cat  dev:chronicle/pg-source/chronicle/latest.json | jq
+
+./hack/dev/history.sh pg-source      # the history as a table
+./hack/dev/snapshot.sh | jq          # the newest snapshot
+```
+
+Without host rclone, the same through the in-cluster pod:
+
+```bash
+kubectl exec deploy/rclone -- rclone tree dev:chronicle
+```
+
+---
+
 ## Test procedures
 
-Each phase below is independent. Substitute `meta-minio` for `config-store` to run
-the same procedure against MinIO; both are verified.
+Each phase is independent. `./hack/dev/down.sh --keep` removes what a phase
+created while keeping `pg-source`, the stores and the bucket.
 
 ### Phase 1 — capture
 
-```bash
-kubectl apply -f - <<'EOF'
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata: {name: pg-source}
-spec:
-  instances: 1
-  storage: {size: 1Gi}
-  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
-  imagePullPolicy: IfNotPresent
-  postgresql:
-    parameters: {shared_buffers: 128MB, work_mem: 16MB}
-    pg_hba: ["host all all 10.244.0.0/16 scram-sha-256"]
-  resources:
-    requests: {cpu: 100m, memory: 256Mi}
-  plugins:
-    - name: chronicle.sharifmshaker.github.io
-      parameters: {saveToStore: config-store}
-  affinity:
-    nodeSelector: {postgres.node.kubernetes.io: ""}
-    tolerations: [{key: node-role.kubernetes.io/postgres, operator: Exists, effect: NoSchedule}]
-EOF
-```
+`pg-source` already captures into `config-store`.
 
 | # | Do | Expect |
 |---|---|---|
-| 1.1 | wait for the cluster | one snapshot object under `<server>/chronicle/snapshots/` |
-| 1.2 | change a GUC | a second snapshot object; generation advances, new `checksum` |
-| 1.3 | `kubectl label cluster pg-source tier=gold` | a third snapshot with **generation unchanged** — labels do not bump `metadata.generation`, so the metadata fingerprint is what catches it |
-| 1.4 | change a field no group captures, e.g. `enableSuperuserAccess` | generation advances, **no new object** — the extracted checksum matches what the store already holds |
+| 1.1 | `./hack/dev/history.sh pg-source` | at least one snapshot |
+| 1.2 | change a GUC | a new snapshot; generation advances, new `checksum` |
+| 1.3 | `kubectl label cluster pg-source tier=gold` | a new snapshot with **generation unchanged** — labels do not bump `metadata.generation`, so the metadata fingerprint is what catches it |
+| 1.4 | change a field no default group captures, e.g. `enableSuperuserAccess` | generation advances, **no new snapshot** — the extracted checksum matches what the store already holds |
 | 1.5 | leave it idle 2 minutes | `resourceVersion` and log line count static — no requeue storm |
 
 ```bash
 # 1.2
 kubectl patch cluster pg-source --type=merge \
-  -p '{"spec":{"postgresql":{"parameters":{"shared_buffers":"128MB","work_mem":"32MB"}}}}'
-
-# watch what has actually been captured
+  -p '{"spec":{"postgresql":{"parameters":{"shared_buffers":"128MB"}}}}'
 ./hack/dev/history.sh pg-source
-
-# and the bucket
-docker run --rm --network kind --entrypoint sh quay.io/minio/mc:latest -c \
-  "mc alias set s http://objectstore-eu:9000 cnpg Cl0udNativePGRocks >/dev/null &&
-   mc ls --recursive s/backups/pg-source/"
 ```
 
 `shared_buffers` must not exceed `resources.requests.memory`, or CNPG's own
@@ -385,11 +187,8 @@ validating webhook rejects the patch — a real constraint, not a plugin problem
 Also confirm the snapshot never contains archiving configuration:
 
 ```bash
-docker run --rm --network kind --entrypoint sh quay.io/minio/mc:latest -c \
-  "mc alias set s http://objectstore-eu:9000 cnpg Cl0udNativePGRocks >/dev/null &&
-   mc cat s/backups/pg-source/chronicle/latest.json" \
-  | python3 -c "import sys,json; s=json.load(sys.stdin)['spec']
-print('LEAK' if any(k in s for k in ('plugins','backup','externalClusters','bootstrap')) else 'clean')"
+rclone cat dev:chronicle/pg-source/chronicle/latest.json \
+  | jq -r 'if (.spec | has("plugins") or has("backup") or has("externalClusters") or has("bootstrap")) then "LEAK" else "clean" end'
 ```
 
 ### Phase 2 — restore
@@ -403,22 +202,25 @@ spec:
   select: {mode: Latest}
   skip:
     - group: Resources
+    - path: metadata.annotations
+      except: [example.com/owner]
 EOF
 ```
 
 | # | Do | Expect |
 |---|---|---|
 | 2.1 | `kubectl get restorepolicy` | `Ready: True` — a statement about the rules; the policy reads no store |
-| 2.2 | create a cluster with `restoreFrom`, asking for **more** storage than the source | persisted spec shows the source's smaller size — an update could never shrink it |
-| 2.3 | check `metadata.annotations` | one key `chronicle.sharifmshaker.github.io/restored-from`, not nested objects |
-| 2.4 | inspect the bucket | the restored cluster writes under **its own** `serverName` prefix |
-| 2.5 | set `restoreFrom` to a name that does not exist | `kubectl apply` **denied**, message names the missing policy |
-| 2.6 | set `saveTo` and `serverName` equal to the source | denied: would interleave the source's history |
+| 2.2 | create a cluster restoring from `pg-source`, asking for **more** storage than the source | persisted spec shows the source's smaller size — an update could never shrink it |
+| 2.3 | read the restore record | one annotation key, `chronicle.sharifmshaker.github.io/restored-from`, not nested objects |
+| 2.4 | read the restored cluster's annotations | `example.com/owner` restored from the source, and none of the source's other annotations |
+| 2.5 | name a `restorePolicy` that does not exist | `kubectl apply` **denied**, message names the missing policy |
+| 2.6 | set `saveToStore` and `saveToServer` equal to the source | denied: would interleave the source's history |
 | 2.7 | delete the `MutatingWebhookConfiguration`, then create a restoring cluster | cluster refused, `PhaseFailurePlugin`, no pods created |
 
 ```bash
 # 2.3
-kubectl get cluster pg-restored -o jsonpath='{.metadata.annotations}' | python3 -m json.tool
+kubectl get cluster pg-restored \
+  -o jsonpath='{.metadata.annotations.chronicle\.sharifmshaker\.github\.io/restored-from}' | jq
 ```
 
 ### Phase 3 — alignment with a recovery target
@@ -439,27 +241,27 @@ CloudNativePG **requires** `backupID` alongside `targetXID`, `targetName` and
 `targetImmediate`; a cluster with `targetXID` alone is rejected by CNPG itself
 before the plugin sees it.
 
-To test 3.3 without running a real backup, create a `Backup` and set its status
-directly:
+`hack/dev/scenarios/04-restore-pitr.yaml` takes a real backup. To test 3.3
+without one, create a `Backup` and set its status directly:
 
 ```bash
 kubectl apply -f - <<'EOF'
 apiVersion: postgresql.cnpg.io/v1
 kind: Backup
-metadata: {name: nightly-eu}
+metadata: {name: nightly}
 spec:
   cluster: {name: pg-source}
   method: barmanObjectStore
 EOF
 
-kubectl patch backup nightly-eu --subresource=status --type=merge \
+kubectl patch backup nightly --subresource=status --type=merge \
   -p '{"status":{"backupId":"20260826T025730","stoppedAt":"2026-08-26T02:57:30Z","phase":"completed"}}'
 ```
 
 ```bash
 kubectl get cluster pg-aligned \
   -o jsonpath='{.metadata.annotations.chronicle\.sharifmshaker\.github\.io/restored-from}' \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['alignedWith']); print(d['snapshotKey'])"
+  | jq '{alignedWith, snapshotKey}'
 ```
 
 ### Phase 4 — transforms
@@ -477,18 +279,18 @@ spec:
       expression: 'old.multiply(2)'
     - path: spec.postgresql.parameters.shared_buffers
       expression: 'pgScale(old, 2)'
-    - path: spec.postgresql.parameters.work_mem
-      expression: 'pgMemFormat(pgMem(old) / 2, "kB")'
+    - path: spec.postgresql.parameters.max_connections
+      expression: 'old > 100 ? 100 : old'
 EOF
 
-kubectl get restorepolicy scaled -o jsonpath='{.status.conditions}' | python3 -m json.tool
+kubectl get restorepolicy scaled -o jsonpath='{.status.conditions}' | jq
 ```
 
 | # | Do | Expect |
 |---|---|---|
 | 4.1 | read `status.conditions` | `Ready: True` — paths resolve against the allowlist and CloudNativePG's types |
-| 4.2 | restore a cluster | values scaled, not copied |
-| 4.3 | mistype a transform path | `Ready: False` naming the field that does not exist; cluster creation denied |
+| 4.2 | restore a cluster | values scaled, not copied; `max_connections` is the **string** `"100"`, because GUCs are strings and a result keeps the captured value's type |
+| 4.3 | mistype a transform path | `Ready: False` naming the field that does not exist; cluster creation denied with the same message |
 | 4.4 | transform a path also in `skip` | denied as contradictory |
 | 4.5 | `old.multiply(2)` on a GUC whose value is `on` | `Ready: True` (the path is valid), then the cluster is denied — type errors surface only at evaluation |
 
@@ -506,8 +308,8 @@ and deliberately does not duplicate CNPG's cross-field rules.
 |---|---|
 | plugin starts with the barman CRD **absent** | the standalone `configuration` path must not depend on it |
 | plugin picks up a barman `ObjectStore` created **after** it started | reads are uncached, no informer |
+| a `ConfigStore` naming a missing Secret key is `Ready: False` | credentials are read when the store is checked, not first at capture |
 | idle 2 minutes: no new log lines, `resourceVersion` static | CloudNativePG polls the plugin's status every 5s; a settled cluster must answer without provoking a write |
-| idle 2 minutes: no object-store requests | the settled case answers from the watermark on the Cluster, without reading the bucket |
 | restart the plugin, confirm no re-capture | the watermark lives in the bucket, not in the process |
 
 ---
@@ -516,14 +318,11 @@ and deliberately does not duplicate CNPG's cross-field rules.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| every controller times out on `https://10.96.0.1:443/api` | `kube-proxy` crash-looping on inotify limits | raise `fs.inotify.max_user_instances` (see above) and delete the `kube-proxy` pods |
-| `ImagePullBackOff` from ghcr.io | intermittent registry access | retry `docker pull` in a loop; it usually succeeds within ~4 attempts, then side-load |
-| `kind load` succeeds but the image is absent | colima's containerd image store | `docker save … \| docker exec -i … ctr images import -` |
+| every controller times out on `https://10.96.0.1:443/api` | `kube-proxy` crash-looping on inotify limits | raise `fs.inotify.max_user_instances` and delete the `kube-proxy` pods |
+| `ImagePullBackOff` for the plugin image you built | `kind load` did not take | stream the image in; see [above](#if-kind-load-silently-does-nothing) |
 | image build takes 11+ minutes every time | BuildKit missing, cache mounts ignored | install `docker-buildx` and register `cliPluginsExtraDirs` |
-| `mapfile: command not found` | macOS bash 3.2 | pass regions explicitly: `./scripts/setup.sh eu` |
-| `Missing command kubectl-cnpg` / `cmctl` | `demo/setup.sh` prerequisites | `brew install kubectl-cnpg cmctl` |
 | `Memory request is lower than shared_buffers` | CNPG cross-field validation | raise `resources.requests.memory` or lower `shared_buffers` |
-| CNPG operator restarting repeatedly | CPU starvation on a small VM | delete unused test clusters; do not build images while testing |
+| CNPG operator restarting repeatedly | CPU or memory starvation on a small VM | delete unused test clusters; do not build images while testing |
 | cluster stuck in `PhaseUnknownPlugin` | plugin Service not discovered | it must be in the operator's namespace with the `cnpg.io/pluginName` label and all three `cnpg.io/plugin*` annotations |
 | `mapping values are not allowed in this context` applying a policy | unquoted CEL ternary | quote the expression |
 
@@ -531,7 +330,7 @@ Useful one-liners:
 
 ```bash
 # plugin messages without the stack traces
-kubectl -n cnpg-system logs -l app=chronicle --tail=50 | grep -oE '"(msg|error)":"[^"]{0,200}"'
+kubectl -n cnpg-system logs deploy/chronicle --tail=50 | grep -oE '"(msg|error)":"[^"]{0,200}"'
 
 # why a cluster is unhappy
 kubectl get cluster pg-source -o jsonpath='{.status.phaseReason}'
@@ -545,12 +344,8 @@ kubectl get cluster pg-source -o jsonpath='{.status.phaseReason}'
 ## Teardown
 
 ```bash
-kubectl delete cluster --all
-kubectl delete restorepolicy,configstore --all
-make undeploy
+./hack/dev/down.sh --keep    # remove what the phases created, keep the environment
+make dev-down                # delete the whole kind cluster, bucket included
 
-cd cnpg-playground && ./scripts/teardown.sh eu
-
-docker rm -f chronicle-minio
 docker buildx prune          # only if you want the ~11 minute cold build back
 ```

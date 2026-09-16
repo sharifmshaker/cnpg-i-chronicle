@@ -45,7 +45,7 @@ func TestDeriveNarrowsABarmanConfiguration(t *testing.T) {
 	raw := barmanSpecConfiguration(t, `{
 	  "destinationPath": "s3://backups/team/prod",
 	  "endpointURL": "http://backups:9000",
-	  "endpointCA": {"name": "minio-tls", "key": "tls.crt"},
+	  "endpointCA": {"name": "objectstore-tls", "key": "tls.crt"},
 	  "s3Credentials": {
 	    "accessKeyId": {"name": "backups", "key": "ACCESS_KEY_ID"},
 	    "secretAccessKey": {"name": "backups", "key": "ACCESS_SECRET_KEY"},
@@ -69,7 +69,7 @@ func TestDeriveNarrowsABarmanConfiguration(t *testing.T) {
 	if got.EndpointURL != "http://backups:9000" {
 		t.Errorf("endpointURL = %q", got.EndpointURL)
 	}
-	if got.EndpointCA == nil || got.EndpointCA.Name != "minio-tls" || got.EndpointCA.Key != "tls.crt" {
+	if got.EndpointCA == nil || got.EndpointCA.Name != "objectstore-tls" || got.EndpointCA.Key != "tls.crt" {
 		t.Errorf("endpointCA = %+v", got.EndpointCA)
 	}
 	if got.S3Credentials.AccessKeyID == nil || got.S3Credentials.AccessKeyID.Key != "ACCESS_KEY_ID" {

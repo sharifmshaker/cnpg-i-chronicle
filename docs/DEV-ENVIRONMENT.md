@@ -19,7 +19,6 @@ make dev-snapshot    # the newest snapshot document
 make dev-down        # delete the cluster
 ```
 
-There is no dependency on [cnpg-playground](https://github.com/cloudnative-pg/cnpg-playground).
 Everything is provisioned by scripts in `hack/dev/`.
 
 ---
@@ -194,7 +193,7 @@ while that exact name resolves fine from any pod in `default`. Hence
 `ConfigStore` or barman `ObjectStore` against a Service in another namespace,
 qualify it the same way.
 
-**RustFS by default.** See [Why not MinIO](#why-not-minio) below.
+**RustFS by default.** See [The object store](#the-object-store) below.
 
 The bucket-creation Job has `backoffLimit: 30` and is deleted-then-reapplied on
 every run: Jobs are immutable once created, so re-applying an existing one
@@ -375,34 +374,22 @@ installed on macOS by default.
 
 ---
 
-## Why not MinIO
+## The object store
 
-MinIO was the obvious choice for this and is no longer viable:
+The plugin works with any S3-compatible endpoint. This environment needs one
+that runs as a single pod inside kind.
 
-| Date | |
-|---|---|
-| May 2025 | console and LDAP/OIDC removed from the community edition |
-| Sept 7, 2025 | last published Docker image |
-| Oct 16, 2025 | CVE-2025-62506 disclosed — fixed in source, never in an image |
-| Mar 20, 2026 | `minio/operator` archived |
-| Apr 25, 2026 | `minio/minio` archived |
-| Jul 14, 2026 | `minio/mc` archived |
-
-The licence never changed; the project was hollowed out and then stopped. For a
-dev dependency the disqualifier is concrete: no published image newer than
-September 2025, carrying a known unpatched vulnerability.
-
-**RustFS** is the default because cnpg-playground migrated to it, which means
+**RustFS** is the default because cnpg-playground uses it, which means
 barman-cloud writing WAL and base backups into RustFS is exercised by the
 CloudNativePG project itself — the same workload this environment runs. It is
 Apache-2.0 and actively developed. The honest caveat is that it has not cut a
 stable 1.0, so the image is pinned rather than tracking `latest`.
 
-**SeaweedFS** is the hedge, one variable away (`DEV_S3=seaweedfs`). Apache-2.0,
-stable releases, the most actively maintained of the post-MinIO options.
+**SeaweedFS** is the hedge, one variable away (`DEV_S3=seaweedfs`). It is
+Apache-2.0 and cuts stable releases.
 
-**rclone** replaces `mc`. It is MIT, vendor-neutral, and speaks to any S3
-endpoint rather than to one vendor's server.
+**rclone** is the inspection tool. It is MIT, vendor-neutral, and speaks to any
+S3 endpoint.
 
 ---
 
@@ -500,10 +487,10 @@ which is usually what you want when something is behaving strangely.
 
 ## Relationship to `docs/TESTING.md`
 
-`TESTING.md` is the *manual* procedure: how to set this up by hand, on
-cnpg-playground or plain kind, and what to assert at each phase. It is the
-reference when you need to understand a step or reproduce something in a
-different topology.
+`TESTING.md` is the *manual* procedure: how to assemble this environment by
+hand, and what to do and expect at each phase of the plugin. It is the
+reference when you need to understand a step or check a behaviour
+deliberately.
 
 This environment automates the common path. Use `up.sh` day to day; reach for
 `TESTING.md` when you need to vary something it does not expose.

@@ -39,7 +39,7 @@ import (
 )
 
 // s3Backend implements Backend against any S3-compatible endpoint, including
-// the RustFS instance cnpg-playground runs.
+// the RustFS store the dev environment runs.
 type s3Backend struct {
 	client *s3.Client
 	bucket string
@@ -68,8 +68,8 @@ func NewS3Backend(ctx context.Context, options S3Options) (Backend, error) {
 		return nil, errors.New("s3 backend requires a bucket")
 	}
 
-	// S3 always wants a region even when the endpoint ignores it; MinIO and
-	// RustFS accept any value.
+	// S3 always wants a region even when the endpoint ignores it; self-hosted
+	// stores such as RustFS accept any value.
 	region := options.Region
 	if region == "" {
 		region = "us-east-1"
@@ -101,7 +101,7 @@ func NewS3Backend(ctx context.Context, options S3Options) (Backend, error) {
 		if options.EndpointURL != "" {
 			o.BaseEndpoint = aws.String(options.EndpointURL)
 			// Virtual-host addressing requires per-bucket DNS, which
-			// self-hosted endpoints such as RustFS and MinIO do not provide.
+			// self-hosted endpoints such as RustFS do not provide.
 			o.UsePathStyle = true
 		}
 	})
@@ -173,7 +173,7 @@ func (b *s3Backend) Put(ctx context.Context, key string, data []byte) error {
 	}
 
 	// The bucket does not exist yet. barman-cloud's S3 client creates it on
-	// first write, and self-hosted endpoints such as MinIO and RustFS never
+	// first write, and self-hosted endpoints such as RustFS never
 	// create one implicitly, so a store pointed at a fresh bucket would fail
 	// here for a reason the user reasonably expects to be handled. Create it
 	// once and retry, exactly once, so a genuinely broken store still surfaces.
