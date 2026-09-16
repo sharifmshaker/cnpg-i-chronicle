@@ -1,0 +1,132 @@
+# RustFS — the dev environment's S3-compatible object store.
+#
+# Why RustFS and not MinIO: MinIO's community edition was archived during 2026
+# (minio/minio in April, minio/mc in July), its last published image predates
+# CVE-2025-62506, and the console was cut from the community build in May 2025.
+# RustFS is Apache-2.0, actively developed, and — the deciding factor — is what
+# cnpg-playground migrated to, so barman-cloud writing WAL and base backups into
+# it is already exercised by the CloudNativePG project itself.
+#
+# RustFS has not cut a stable 1.0 yet. That is acceptable for a dev-only
+# dependency, and DEV_S3=seaweedfs swaps it for a store that has.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: "${DEV_S3_SERVICE}"
+  namespace: "${DEV_NAMESPACE}"
+type: Opaque
+stringData:
+  # These key names match barman-cloud's convention, so one Secret backs both
+  # the barman ObjectStore and the chronicle ConfigStore.
+  ACCESS_KEY_ID: "${DEV_ACCESS_KEY}"
+  ACCESS_SECRET_KEY: "${DEV_SECRET_KEY}"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "${DEV_S3_SERVICE}"
+  namespace: "${DEV_NAMESPACE}"
+spec:
+  # kind ships the rancher local-path provisioner as the default StorageClass.
+  # A PVC rather than an emptyDir, so a restarted pod does not silently lose
+  # every backup and snapshot mid-session.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "${DEV_S3_SERVICE}"
+  namespace: "${DEV_NAMESPACE}"
+spec:
+  replicas: 1
+  strategy:
+    # A single RWO volume cannot attach to two pods, so a rolling update would
+    # deadlock waiting for itself.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: "${DEV_S3_SERVICE}"
+  template:
+    metadata:
+      labels:
+        app: "${DEV_S3_SERVICE}"
+    spec:
+      # Everything is pinned to the control-plane node. A pod on a kind worker
+      # that cannot route to the API server fails in a way that looks like a bug
+      # in the workload rather than a networking problem.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: rustfs
+          image: "${DEV_S3_IMAGE}"
+          env:
+            - name: RUSTFS_VOLUMES
+              value: /data
+            - name: RUSTFS_ADDRESS
+              value: "0.0.0.0:9000"
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: "true"
+            - name: RUSTFS_CONSOLE_ADDRESS
+              value: "0.0.0.0:9001"
+            - name: RUSTFS_ACCESS_KEY
+              value: "${DEV_ACCESS_KEY}"
+            - name: RUSTFS_SECRET_KEY
+              value: "${DEV_SECRET_KEY}"
+            - name: RUSTFS_OBS_LOGGER_LEVEL
+              value: warn
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          # A TCP probe rather than an HTTP one: the health endpoint's path has
+          # moved between RustFS release candidates; a socket check has not.
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: "${DEV_S3_SERVICE}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "${DEV_S3_SERVICE}"
+  namespace: "${DEV_NAMESPACE}"
+spec:
+  # NodePort with fixed ports, because kind.yaml maps them to localhost. That is
+  # what lets rclone on the host reach the same bucket the cluster writes to,
+  # with no port-forward to keep alive.
+  type: NodePort
+  selector:
+    app: "${DEV_S3_SERVICE}"
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+      nodePort: 30900
+    - name: console
+      port: 9001
+      targetPort: 9001
+      nodePort: 30901

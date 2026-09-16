@@ -1,0 +1,26 @@
+# A single-node cluster, deliberately.
+#
+# Everything this plugin touches — the CNPG operator, cert-manager, the barman
+# plugin and chronicle itself — is pinned to the control-plane node. Adding
+# workers buys nothing here and reliably costs an afternoon: a pod scheduled on
+# a kind worker that cannot route to the API server at 10.96.0.1:443 fails in a
+# way that looks like a bug in whatever is running there rather than a
+# networking problem.
+#
+# The two port mappings put the object store on the host, so the bucket can be
+# inspected from a browser and from rclone without a port-forward to keep alive.
+# They must agree with DEV_S3_HOST_PORT and DEV_CONSOLE_HOST_PORT in config.sh.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: chronicle-dev
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # S3 API -> http://localhost:19000
+      - containerPort: 30900
+        hostPort: 19000
+        protocol: TCP
+      # console -> http://localhost:19001
+      - containerPort: 30901
+        hostPort: 19001
+        protocol: TCP

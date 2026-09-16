@@ -1,0 +1,33 @@
+# A cluster that archives WAL with barman-cloud and snapshots its configuration
+# with chronicle, into the same bucket.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-source
+spec:
+  instances: 3
+
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: backup-store
+
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        saveToStore: config-store
+        # saveToServer defaults to the cluster name, matching barman-cloud, so
+        # snapshots sit beside this cluster's own backups.
+
+  storage:
+    size: 10Gi
+
+  postgresql:
+    parameters:
+      shared_buffers: 128MB
+      work_mem: 4MB
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi

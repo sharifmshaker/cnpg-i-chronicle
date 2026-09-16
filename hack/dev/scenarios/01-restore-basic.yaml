@@ -1,0 +1,56 @@
+# Scenario 1 — restore a cluster's configuration from another cluster's history.
+#
+#   kubectl apply -f hack/dev/scenarios/01-restore-basic.yaml
+#
+# Creates pg-restored from pg-source's captured configuration, keeping a few of its
+# own values. The restore happens inside the admission webhook, at CREATE, so by
+# the time the object exists it already carries the restored spec — there is no
+# reconcile loop to wait for:
+#
+#   kubectl get cluster pg-restored -o jsonpath='{.spec.postgresql.parameters}' | jq
+#
+# Expect shared_buffers 96MB and max_connections 120 from pg-source, storage 5Gi and
+# work_mem 1MB kept from the manifest below.
+#
+# The record of what happened is on the cluster itself:
+#
+#   kubectl get cluster pg-restored \
+#     -o jsonpath='{.metadata.annotations.chronicle\.sharifmshaker\.github\.io/restored-from}' | jq
+---
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: from-pg-source
+spec:
+  # No source. A policy says HOW to restore, never WHAT from — which is why the
+  # same policy can serve every cluster you own.
+  select:
+    mode: Latest        # | Generation (+generation) | Timestamp (+timestamp)
+  skip:
+    # Keep this cluster's own sizing rather than the source's.
+    - group: Resources
+    - path: spec.storage.size
+    # And one specific GUC.
+    - path: spec.postgresql.parameters.work_mem
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-restored
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage:
+    size: 5Gi
+  postgresql:
+    parameters:
+      work_mem: 1MB
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        # WHAT to restore: named on the cluster, because it is a fact about
+        # this cluster rather than about the rules.
+        restoreFromStore: config-store
+        restoreFromServer: pg-source
+        # HOW: optional. Drop it and the history restores exactly as captured.
+        restorePolicy: from-pg-source

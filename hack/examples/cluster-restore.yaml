@@ -1,0 +1,41 @@
+# Restore a cluster's configuration from another cluster's captured history.
+#
+# The RestorePolicy is read once, by the mutating admission webhook, at the
+# moment this Cluster is created. Because that happens at CREATE rather than on
+# update, the snapshot can shrink storage, change storageClass and set
+# postgresUID — none of which CloudNativePG permits on an existing cluster.
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: from-prod
+spec:
+  select:
+    mode: Latest           # | Generation (+generation) | Timestamp (+timestamp)
+  skip:
+    # Keep this cluster's own sizing rather than production's.
+    - group: Resources
+    - path: spec.storage.size
+    # Keep the target's value for one specific GUC.
+    - path: spec.postgresql.parameters.work_mem
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-restored
+spec:
+  instances: 1
+  storage:
+    size: 5Gi
+
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        # WHAT to restore. Both are required together.
+        restoreFromStore: config-store
+        restoreFromServer: pg-prod
+        # HOW, optionally. Omit it and the history restores as captured.
+        restorePolicy: from-prod
+        # Archiving is independent. It must not resolve to the same store AND
+        # server name being restored from, or this cluster's history would be
+        # interleaved with the source cluster's. Admission refuses that.
+        saveToStore: config-store

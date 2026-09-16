@@ -1,0 +1,113 @@
+# Scenario 6 — the things that are refused, and where each is caught.
+#
+#   kubectl apply -f hack/dev/scenarios/06-guardrails.yaml
+#
+# Errors are expected. They arrive in two places, and the difference matters:
+#
+#   * A bad RestorePolicy is CREATED, then reported unusable by its controller.
+#     Rules are checked as far as they can be without a history — syntax,
+#     expression compilation, and paths that contradict each other. Anything
+#     needing a real value waits for a cluster to be created.
+#
+#   * A bad Cluster is REFUSED at admission, before the object exists. There is
+#     no second chance for a cluster: its configuration is restored once, at
+#     CREATE, so anything wrong has to stop it there.
+#
+# After applying, read both:
+#
+#   kubectl get restorepolicy \
+#     -o 'custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status,WHY:.status.conditions[0].message'
+#
+#   (quote it: [0] is a glob in zsh, which is the macOS default shell)
+#
+# Expect:
+#
+#  1. contradictory-rules  Ready=False — spec.storage.size is both skipped and
+#     transformed. A skipped path is never restored, so its expression could
+#     never run. Caught with no history at all: skip rules resolve group names
+#     to paths, so the contradiction is visible in the spec alone.
+#
+#  2. bad-expression       Ready=False — `old.divideBy(2)` is not a function.
+#
+# And three clusters refused outright by the webhook:
+#
+#  3. pg-self-referential  archives to the same store and server name it
+#     restores from, which would interleave its history with the source's.
+#
+#  4. pg-missing-policy    names a RestorePolicy that does not exist. Naming a
+#     policy is opting into rules, so a missing one is a mistake rather than
+#     "restore it plain".
+#
+#  5. pg-half-specified    sets restoreFromStore with no restoreFromServer.
+#
+# The safety property that produces no error at all is the one worth knowing:
+# a successful restore never writes spec.plugins, spec.backup, spec.bootstrap or
+# spec.externalClusters. Copying those would point two clusters at one WAL
+# archive. This plugin restores tuning, not wiring.
+---
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: contradictory-rules
+spec:
+  skip:
+    - path: spec.storage.size
+  transform:
+    - path: spec.storage.size
+      expression: 'old.divide(2)'
+---
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: bad-expression
+spec:
+  transform:
+    - path: spec.storage.size
+      expression: 'old.divideBy(2)'      # no such function
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-self-referential
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage: {size: 1Gi}
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        # Restores from, and archives to, the same store and server name.
+        restoreFromStore: config-store
+        restoreFromServer: pg-self-referential
+        saveToStore: config-store
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-missing-policy
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage: {size: 1Gi}
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        restoreFromStore: config-store
+        restoreFromServer: pg-source
+        restorePolicy: no-such-policy
+---
+# 5. A restore that names a store but not a server. It says where to look
+#    without saying what to look for, so it is refused rather than guessed at.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-half-specified
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage: {size: 1Gi}
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        restoreFromStore: config-store
+        # restoreFromServer deliberately missing

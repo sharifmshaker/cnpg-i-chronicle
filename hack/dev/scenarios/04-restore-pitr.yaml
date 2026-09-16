@@ -1,0 +1,89 @@
+# Scenario 4 — align the restored configuration with the recovery target.
+#
+# This is the feature the project exists for. Restoring data to last Tuesday and
+# then applying today's configuration produces a cluster that never existed.
+# AlignWithRecoveryTarget reads the Cluster's own bootstrap.recovery stanza and
+# picks the configuration that was in force at the moment the data corresponds
+# to — no timestamp to copy by hand, and no way for the two to drift apart.
+#
+# TWO STEPS, because a point-in-time restore needs a real base backup.
+#
+# Step 1 — take a backup and wait for it to complete:
+#
+#   kubectl apply -f hack/dev/scenarios/04-restore-pitr.yaml   # creates the Backup
+#   kubectl wait --for=jsonpath='{.status.phase}'=completed backup/pitr-base --timeout=300s
+#
+# Step 2 — change the configuration so "then" and "now" differ, then recover:
+#
+#   kubectl patch cluster pg-source --type merge \
+#     -p '{"spec":{"postgresql":{"parameters":{"shared_buffers":"256MB"}}}}'
+#   ./hack/dev/history.sh pg-source          # confirm a second snapshot landed
+#   kubectl apply -f hack/dev/scenarios/04-restore-pitr.yaml   # now the Cluster admits
+#
+# Then check which configuration it chose:
+#
+#   kubectl get cluster pg-pitr -o jsonpath='{.spec.postgresql.parameters.shared_buffers}'
+#   kubectl get cluster pg-pitr \
+#     -o jsonpath='{.metadata.annotations.chronicle\.sharifmshaker\.github\.io/restored-from}' \
+#     | jq .alignedWith
+#
+# Expect 96MB — what was live when the backup was taken — and an `alignedWith`
+# naming the backup it anchored to.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: pitr-base
+spec:
+  cluster:
+    name: pg-source
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+---
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: aligned-with-pitr
+spec:
+  select:
+    mode: AlignWithRecoveryTarget
+    # Fail (the default) refuses the cluster when the recovery target cannot be
+    # mapped to a moment. UseLatest accepts the newest configuration instead.
+    #
+    # Fail is the right default: silently restoring today's configuration onto
+    # last week's data is exactly the failure this mode exists to prevent.
+    onUnresolvable: Fail
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-pitr
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage:
+    size: 2Gi
+
+  bootstrap:
+    recovery:
+      source: origin
+      recoveryTarget:
+        # Anchored to the backup above. chronicle resolves this Backup to the
+        # moment it ended and picks the configuration in force then.
+        backupID: pitr-base
+
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: backup-store
+          serverName: pg-source
+
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        restoreFromStore: config-store
+        restoreFromServer: pg-source
+        restorePolicy: aligned-with-pitr

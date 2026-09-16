@@ -1,0 +1,13 @@
+# Piggyback on the object store a cluster already uses for backups.
+#
+# Only .spec.configuration of the referenced ObjectStore is read; barman-owned
+# fields such as retentionPolicy and instanceSidecarConfiguration are ignored.
+# Snapshots land at <destinationPath>/<serverName>/chronicle/, a sibling of
+# barman's base/ and wals/ directories, which barman never enumerates.
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: ConfigStore
+metadata:
+  name: config-store
+spec:
+  derivedFrom:
+    name: backup-store

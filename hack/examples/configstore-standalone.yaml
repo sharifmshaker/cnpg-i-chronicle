@@ -1,0 +1,25 @@
+# A store that does not depend on the barman-cloud plugin being installed.
+#
+# The configuration is scoped to what this plugin uses: where the store is, how
+# to reach it, and how to authenticate. There is no wal/data compression,
+# parallelism or tagging here — those belong to a backup tool, not to writing a
+# JSON document — and no serverName, because one store serves many clusters and
+# the per-cluster name comes from the plugin's serverName parameter.
+#
+# Credential field names match barman-cloud's, so this block can be copied
+# across from an existing backup configuration unchanged.
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: ConfigStore
+metadata:
+  name: standalone-store
+spec:
+  configuration:
+    destinationPath: s3://backups/
+    endpointURL: http://backups:9000
+    s3Credentials:
+      accessKeyId:
+        name: backup-store
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: backup-store
+        key: ACCESS_SECRET_KEY

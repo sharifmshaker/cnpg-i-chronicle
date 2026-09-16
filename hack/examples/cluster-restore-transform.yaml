@@ -1,0 +1,63 @@
+# Inherit production's shape without inheriting its size.
+#
+# Transforms are CEL expressions with `old` bound to the captured value. What
+# `old` is depends on the path, following how CloudNativePG types the field:
+#
+#   a resource quantity or storage size -> a quantity: old.multiply(5), old.divide(2)
+#   an integer field like instances     -> an integer: old * 2, old > 3 ? 3 : old
+#   a GUC holding a number, like "200"  -> a number:   old * 2, old * 2.0
+#   any other string                    -> a string
+#
+# Sizes use member calls rather than `old * 5` because cel-go binds arithmetic
+# operators as singletons in its standard library and will not accept overloads
+# for a custom type. Plain integers take the operators directly.
+#
+# PostgreSQL memory settings are NOT Kubernetes quantities — PostgreSQL's MB is
+# binary (1024^2) while Kubernetes' M is decimal (10^6) — so pgScale and pgMem
+# handle those, preserving the unit the source used.
+#
+# Quote every expression. A ternary contains a colon, and unquoted YAML reads
+# `old > 1 ? 1 : old` as a mapping rather than a string.
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: prod-shape-dev-size
+spec:
+  transform:
+    # A tenth of production's disk.
+    - path: spec.storage.size
+      expression: 'old.divide(10)'
+
+    # A quarter of the memory, and never more than one instance.
+    - path: spec.resources.requests.memory
+      expression: 'old.divide(4)'
+    - path: spec.instances
+      expression: 'old > 1 ? 1 : old'
+
+    # Halve a PostgreSQL memory GUC, keeping whatever unit it was written in.
+    - path: spec.postgresql.parameters.shared_buffers
+      expression: 'pgScale(old, 0.5)'
+
+    # The long form, when the unit should change too.
+    - path: spec.postgresql.parameters.work_mem
+      expression: 'pgMemFormat(pgMem(old) / 2, "kB")'
+
+  # A transform and a skip on the same path contradict each other and are
+  # refused: a skipped path is never restored, so its expression cannot run.
+  skip:
+    - path: spec.postgresql.parameters.max_connections
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-dev
+spec:
+  instances: 1
+  storage:
+    size: 1Gi
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        restoreFromStore: config-store
+        restoreFromServer: pg-prod
+        restorePolicy: prod-shape-dev-size

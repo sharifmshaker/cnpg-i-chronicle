@@ -1,0 +1,47 @@
+# The minimal cluster the environment brings up: one instance, archiving WAL
+# with barman-cloud and capturing its configuration with chronicle, both into
+# the same bucket.
+#
+# The parameter values here are deliberately unusual (96MB rather than a default
+# 128MB, and so on) so that a restore into another cluster is visibly a restore
+# rather than a coincidence.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: "${DEV_CLUSTER_NAME}"
+  namespace: "${DEV_NAMESPACE}"
+  labels:
+    environment: dev
+  annotations:
+    example.com/owner: platform-team
+spec:
+  instances: 1
+  imageName: "${DEV_PG_IMAGE}"
+
+  storage:
+    size: 2Gi
+
+  postgresql:
+    parameters:
+      shared_buffers: 96MB
+      work_mem: 12MB
+      max_connections: "120"
+    pg_hba:
+      - host all all 10.244.0.0/16 scram-sha-256
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: backup-store
+
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        saveToStore: config-store
+        # saveToServer defaults to the cluster name, matching barman-cloud, so
+        # snapshots land beside this cluster's own backups.

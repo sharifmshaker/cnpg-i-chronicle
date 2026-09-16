@@ -1,0 +1,13 @@
+# Restore the configuration that was in force at a particular moment.
+#
+# Timestamp selects the newest snapshot captured at or before the given time,
+# which is the configuration that was live then. If the history does not reach
+# back that far the cluster is refused rather than restored from the wrong point.
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: from-prod-before-incident
+spec:
+  select:
+    mode: Timestamp
+    timestamp: "2026-08-25T11:30:00Z"

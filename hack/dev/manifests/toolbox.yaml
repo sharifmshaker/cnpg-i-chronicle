@@ -1,0 +1,100 @@
+# An rclone pod inside the cluster, and a Job that creates the bucket.
+#
+# `mc` used to be the obvious tool here, but minio/mc was archived in July 2026.
+# rclone is the vendor-neutral replacement: MIT, actively maintained, and it
+# speaks to any S3 endpoint rather than to one vendor's server.
+#
+# The toolbox exists so the store can be inspected with nothing installed on the
+# host — kubectl exec is enough. Host-side rclone against localhost:19000 is the
+# nicer path when available, and up.sh prints whichever applies.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rclone-dev-config
+  namespace: "${DEV_NAMESPACE}"
+data:
+  # force_path_style is not optional: virtual-host addressing (bucket.host)
+  # needs per-bucket DNS that a self-hosted store does not provide.
+  rclone.conf: |
+    [dev]
+    type = s3
+    provider = Other
+    endpoint = ${DEV_S3_ENDPOINT}
+    access_key_id = ${DEV_ACCESS_KEY}
+    secret_access_key = ${DEV_SECRET_KEY}
+    force_path_style = true
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-bucket
+  namespace: "${DEV_NAMESPACE}"
+spec:
+  # The store may still be starting on the first run; let the Job retry rather
+  # than ordering the two with a sleep.
+  backoffLimit: 30
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: rclone
+          image: "${DEV_RCLONE_IMAGE}"
+          command:
+            - sh
+            - -c
+            # `rclone mkdir` on a bucket root is create-if-absent, so re-running
+            # up.sh against an existing environment is a no-op, not an error.
+            - |
+              set -e
+              rclone mkdir dev:${DEV_BUCKET}
+              rclone lsd dev:
+              echo "bucket ${DEV_BUCKET} is ready"
+          volumeMounts:
+            - name: config
+              mountPath: /config/rclone
+      volumes:
+        - name: config
+          configMap:
+            name: rclone-dev-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rclone
+  namespace: "${DEV_NAMESPACE}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rclone
+  template:
+    metadata:
+      labels:
+        app: rclone
+    spec:
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: rclone
+          image: "${DEV_RCLONE_IMAGE}"
+          command:
+            - sh
+            - -c
+            - sleep infinity
+          volumeMounts:
+            - name: config
+              mountPath: /config/rclone
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+      volumes:
+        - name: config
+          configMap:
+            name: rclone-dev-config

@@ -1,0 +1,72 @@
+# Scenario 2 — inherit production's shape without inheriting its size.
+#
+#   kubectl apply -f hack/dev/scenarios/02-restore-transform.yaml
+#
+# Transforms are CEL expressions with `old` bound to the captured value. Every
+# path is checked against the capture allowlist and CloudNativePG's own field
+# names when the policy is applied, so a typo shows up on the policy rather than
+# on a cluster:
+#
+#   kubectl get restorepolicy dev-sized -o jsonpath='{.status.conditions}' | jq
+#
+# Then check the result:
+#
+#   kubectl get cluster pg-dev -o jsonpath='{.spec.postgresql.parameters}' | jq
+#   kubectl get cluster pg-dev -o jsonpath='{.spec.storage.size}'
+#
+# What `old` is depends on the path, following how CloudNativePG types the field:
+#   a resource quantity or storage size -> a quantity: old.multiply(5), old.divide(2)
+#   an integer field like instances     -> an integer: old * 2, old > 3 ? 3 : old
+#   a GUC holding a number, like "200"  -> a number:   old * 2, old * 2.0
+#   any other string                    -> a string
+#
+# Sizes use member calls rather than `old * 5` because cel-go binds arithmetic
+# operators as singletons and will not accept overloads for a custom type.
+#
+# PostgreSQL memory GUCs are NOT Kubernetes quantities — PostgreSQL's MB is
+# binary (1024^2), Kubernetes' M is decimal (10^6) — so pgScale and pgMem handle
+# those and preserve the unit the source used.
+#
+# Quote every expression: a ternary contains a colon, and unquoted YAML reads
+# `old > 1 ? 1 : old` as a mapping rather than a string.
+---
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: dev-sized
+spec:
+  transform:
+    # Half of the source's disk: 2Gi -> 1Gi.
+    - path: spec.storage.size
+      expression: 'old.divide(2)'
+    # Double its shared_buffers, keeping the unit: 96MB -> 192MB.
+    - path: spec.postgresql.parameters.shared_buffers
+      expression: 'pgScale(old, 2.0)'
+    # Halve work_mem and switch the unit while doing it: 12MB -> 6144kB.
+    - path: spec.postgresql.parameters.work_mem
+      expression: 'pgMemFormat(pgMem(old) / 2, "kB")'
+    # Never more than one instance, whatever the source ran.
+    - path: spec.instances
+      expression: 'old > 1 ? 1 : old'
+  skip:
+    # A skip and a transform on the same path contradict each other and are
+    # refused — a skipped path is never restored, so its expression could not
+    # run. Try adding spec.storage.size here to see it, and note it is caught
+    # with no history involved at all.
+    - path: spec.postgresql.parameters.max_connections
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-dev
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage:
+    size: 1Gi
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        restoreFromStore: config-store
+        restoreFromServer: pg-source
+        restorePolicy: dev-sized

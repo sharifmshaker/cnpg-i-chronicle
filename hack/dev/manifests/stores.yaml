@@ -1,0 +1,43 @@
+# The two store objects, pointed at the same bucket.
+#
+# barman-cloud writes base backups and WAL under <bucket>/<serverName>/{base,wals}/.
+# chronicle writes configuration snapshots under <bucket>/<serverName>/chronicle/,
+# a sibling directory barman never enumerates. One bucket, one credential, two
+# kinds of artifact that travel together — which is the point: when you restore
+# from a backup you may have lost the cluster, the namespace and access to the
+# git repo, but you still have the bucket.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: backup-store
+  namespace: "${DEV_NAMESPACE}"
+spec:
+  configuration:
+    destinationPath: "s3://${DEV_BUCKET}/"
+    endpointURL: "${DEV_S3_ENDPOINT}"
+    s3Credentials:
+      accessKeyId:
+        name: "${DEV_S3_SERVICE}"
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: "${DEV_S3_SERVICE}"
+        key: ACCESS_SECRET_KEY
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+  retentionPolicy: 7d
+---
+# Derived, rather than restating the configuration.
+#
+# This is the mode worth exercising by default: it reads .spec.configuration off
+# the ObjectStore above, so the endpoint and credentials are written down once.
+# Scenario 05 shows the other mode, for installations without the barman plugin.
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: ConfigStore
+metadata:
+  name: config-store
+  namespace: "${DEV_NAMESPACE}"
+spec:
+  derivedFrom:
+    name: backup-store

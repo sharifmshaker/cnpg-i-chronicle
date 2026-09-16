@@ -1,0 +1,47 @@
+# Scenario 3 — restore the configuration that was in force at a moment.
+#
+# This one needs a history with more than one entry, so make a change first and
+# let it be captured:
+#
+#   kubectl patch cluster pg-source --type merge \
+#     -p '{"spec":{"postgresql":{"parameters":{"shared_buffers":"256MB"}}}}'
+#
+#   # wait for the second snapshot, then note the time BETWEEN the two
+#   ./hack/dev/history.sh pg-source
+#
+# Put a timestamp from between the two snapshots into `timestamp` below, then:
+#
+#   kubectl apply -f hack/dev/scenarios/03-restore-at-time.yaml
+#   kubectl get cluster pg-before -o jsonpath='{.spec.postgresql.parameters.shared_buffers}'
+#
+# Expect 96MB — the value that was live at that moment — not the current 256MB.
+#
+# Timestamp selects the newest snapshot captured at or before the given time. If
+# the history does not reach back that far the cluster is refused rather than
+# restored from the wrong point, which is the behaviour you want when the
+# alternative is a silently wrong configuration.
+---
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: RestorePolicy
+metadata:
+  name: before-the-change
+spec:
+  select:
+    mode: Timestamp
+    timestamp: "2026-01-01T00:00:00Z"   # <- EDIT ME (see ./hack/dev/history.sh)
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-before
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage:
+    size: 1Gi
+  plugins:
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        restoreFromStore: config-store
+        restoreFromServer: pg-source
+        restorePolicy: before-the-change

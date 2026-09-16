@@ -1,0 +1,61 @@
+# Scenario 5 — a store that does not depend on the barman-cloud plugin.
+#
+#   kubectl apply -f hack/dev/scenarios/05-standalone-store.yaml
+#   kubectl get configstore standalone-store -o jsonpath='{.status}' | jq
+#
+# The environment's default store (config-store) is *derived*: it reads
+# .spec.configuration off the barman ObjectStore, so the endpoint and
+# credentials are written down once. This is the other mode — the configuration
+# stated directly, for installations that archive WAL some other way, or not at
+# all.
+#
+# The spec is scoped to what this plugin actually uses: where the store is, how
+# to reach it, how to authenticate. No wal/data compression, parallelism or
+# tagging — those belong to a backup tool, not to writing a JSON document. And
+# no serverName, because one store serves many clusters and the per-cluster name
+# comes from the plugin's serverName parameter.
+#
+# The credential field names match barman-cloud's, so this block can be copied
+# across from an existing backup configuration unchanged.
+#
+# Note the fully-qualified endpoint. The plugin runs in the operator's namespace
+# (cnpg-system), so a bare Service name from another namespace does not resolve
+# where the S3 client actually runs.
+#
+# Point a cluster at it with saveToStore: standalone-store. It writes to the same
+# bucket as config-store, so both show up in the same `rclone tree`.
+---
+apiVersion: chronicle.sharifmshaker.github.io/v1
+kind: ConfigStore
+metadata:
+  name: standalone-store
+spec:
+  configuration:
+    destinationPath: s3://chronicle/
+    endpointURL: http://objectstore.default.svc.cluster.local:9000
+    s3Credentials:
+      accessKeyId:
+        name: objectstore
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: objectstore
+        key: ACCESS_SECRET_KEY
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-standalone
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18-minimal-trixie
+  storage:
+    size: 1Gi
+  postgresql:
+    parameters:
+      shared_buffers: 64MB
+  plugins:
+    # No barman-cloud plugin on this cluster at all: it captures configuration
+    # without archiving WAL.
+    - name: chronicle.sharifmshaker.github.io
+      parameters:
+        saveToStore: standalone-store
