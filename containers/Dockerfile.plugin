@@ -17,12 +17,16 @@ COPY internal/ internal/
 
 ARG TARGETOS
 ARG TARGETARCH
+# Reported to the operator and recorded in every snapshot. The release workflow
+# passes the tag; a local build reports "dev".
+ARG VERSION=dev
 # No -a: CGO_ENABLED=0 already produces a static binary, and -a would defeat the
 # build cache mounted below.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w" -o manager ./cmd/manager
+    go build -ldflags="-s -w -X github.com/sharifmshaker/cnpg-i-chronicle/internal/cnpgi/metadata.Version=${VERSION}" \
+    -o manager ./cmd/manager
 
 FROM registry.access.redhat.com/ubi9/ubi-micro:latest
 WORKDIR /

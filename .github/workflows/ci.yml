@@ -43,6 +43,12 @@ jobs:
             echo "::error::run 'make manifests generate' and commit the result"; exit 1
           fi
 
+      # The release renders this with the image pinned to the tag. Checking it
+      # here means a change to kubernetes/ that breaks that substitution fails
+      # a pull request, not a release.
+      - name: Install manifest renders
+        run: make manifest VERSION=0.0.0-ci
+
       # The suite is hermetic: no envtest, no network, no cluster. The S3
       # integration tests are skipped unless CHRONICLE_S3_ENDPOINT is set.
       - name: Test

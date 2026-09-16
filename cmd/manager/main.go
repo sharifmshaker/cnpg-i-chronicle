@@ -35,7 +35,7 @@ func main() {
 	logFlags := &log.Flags{}
 	rootCmd := &cobra.Command{
 		Use:   "manager",
-		Short: "CloudNativePG configuration snapshot and restore plugin",
+		Short: "Chronicle: a configuration snapshot and restore plugin for CloudNativePG",
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			logFlags.ConfigureLogging()
 			cmd.SetContext(log.IntoContext(cmd.Context(), log.GetLogger()))

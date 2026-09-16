@@ -21,15 +21,19 @@ package metadata
 
 import "github.com/cloudnative-pg/cnpg-i/pkg/identity"
 
-const (
-	// PluginName is the CNPG-I plugin name. It must match both the
-	// cnpg.io/pluginName label on the plugin Service and the name used in a
-	// Cluster's .spec.plugins[].
-	PluginName = "chronicle.sharifmshaker.github.io"
+// PluginName is the CNPG-I plugin name. It must match both the
+// cnpg.io/pluginName label on the plugin Service and the name used in a
+// Cluster's .spec.plugins[].
+const PluginName = "chronicle.sharifmshaker.github.io"
 
-	// Version is the plugin version reported to the operator.
-	Version = "0.1.0"
-)
+// Version is the plugin version reported to the operator and recorded in every
+// snapshot as pluginVersion.
+//
+// It is set at link time rather than written here, so a release cannot report
+// a version it is not: the release workflow and `make build VERSION=...` pass
+// -X github.com/sharifmshaker/cnpg-i-chronicle/internal/cnpgi/metadata.Version.
+// Any other build reports "dev".
+var Version = "dev"
 
 // Plugin parameter keys accepted in .spec.plugins[].parameters.
 //
@@ -88,7 +92,7 @@ const (
 var Data = identity.GetPluginMetadataResponse{
 	Name:          PluginName,
 	Version:       Version,
-	DisplayName:   "CloudNativePG Chronicle",
+	DisplayName:   "Chronicle for CloudNativePG",
 	Description:   "Snapshots CloudNativePG Cluster configuration to an object store and restores it on cluster creation.",
 	ProjectUrl:    "https://github.com/sharifmshaker/cnpg-i-chronicle",
 	RepositoryUrl: "https://github.com/sharifmshaker/cnpg-i-chronicle",

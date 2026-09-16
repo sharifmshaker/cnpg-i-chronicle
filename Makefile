@@ -1,4 +1,9 @@
-IMG ?= ghcr.io/sharifmshaker/cnpg-i-chronicle:dev
+IMAGE ?= ghcr.io/sharifmshaker/cnpg-i-chronicle
+VERSION ?= dev
+# The image kubernetes/deployment.yaml names. `make manifest` replaces it with IMG.
+MANIFEST_IMAGE := ghcr.io/sharifmshaker/cnpg-i-chronicle:dev
+IMG ?= $(IMAGE):$(VERSION)
+LDFLAGS := -X github.com/sharifmshaker/cnpg-i-chronicle/internal/cnpgi/metadata.Version=$(VERSION)
 CONTROLLER_TOOLS_VERSION ?= v0.21.0
 LOCALBIN ?= $(shell pwd)/bin
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
@@ -53,15 +58,17 @@ test: generate manifests fmt vet ## Run unit tests
 
 .PHONY: build
 build: generate fmt vet ## Build the binary
-	go build -o bin/manager ./cmd/manager
+	go build -ldflags "$(LDFLAGS)" -o bin/manager ./cmd/manager
 
 .PHONY: docker-build
 docker-build: ## Build the container image (needs buildx for the Go build cache)
-	docker buildx build --load -f containers/Dockerfile.plugin -t $(IMG) .
+	docker buildx build --load --build-arg VERSION=$(VERSION) -f containers/Dockerfile.plugin -t $(IMG) .
 
 .PHONY: manifest
-manifest: manifests ## Render the single-file install manifest
-	kubectl kustomize kubernetes > manifest.yaml
+manifest: manifests ## Render the single-file install manifest, pinned to IMG
+	kubectl kustomize kubernetes | sed 's|image: $(MANIFEST_IMAGE)$$|image: $(IMG)|' > manifest.yaml
+	@grep -q 'image: $(IMG)$$' manifest.yaml \
+		|| { echo "manifest.yaml does not reference $(IMG); has the image in kubernetes/deployment.yaml changed?" >&2; exit 1; }
 
 .PHONY: deploy
 deploy: manifests ## Apply to the current context

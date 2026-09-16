@@ -178,11 +178,20 @@ network.
 
 ### Pod networking only works reliably on the control-plane node
 
-In the playground, the CNPG operator, cert-manager and this plugin are all
-pinned to the control-plane with a `nodeSelector` and a blanket toleration.
-Keep it that way unless you have verified pod-to-apiserver routing from the
-workers. A pod on a worker that cannot reach `10.96.0.1:443` fails in a way that
-looks like a bug in whatever is running there.
+In the playground, the CNPG operator and cert-manager are pinned to the
+control-plane with a `nodeSelector` and a blanket toleration. Keep them there
+unless you have verified pod-to-apiserver routing from the workers. A pod on a
+worker that cannot reach `10.96.0.1:443` fails in a way that looks like a bug in
+whatever is running there.
+
+This plugin's manifest does not pin itself, because on a real cluster there may
+be no schedulable control-plane nodes at all. On the playground, pin it after
+deploying:
+
+```bash
+kubectl -n cnpg-system patch deployment chronicle --type=merge -p \
+  '{"spec":{"template":{"spec":{"nodeSelector":{"node-role.kubernetes.io/control-plane":""},"tolerations":[{"operator":"Exists"}]}}}}'
+```
 
 ---
 

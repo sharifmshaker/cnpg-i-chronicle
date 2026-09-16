@@ -34,10 +34,6 @@ spec:
         app: chronicle
     spec:
       serviceAccountName: chronicle
-      nodeSelector:
-        node-role.kubernetes.io/control-plane: ""
-      tolerations:
-        - operator: Exists
       securityContext:
         runAsNonRoot: true
         seccompProfile:

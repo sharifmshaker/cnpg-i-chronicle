@@ -13,6 +13,9 @@ It piggybacks on the bucket you already use for backups: snapshots go to
 `<destinationPath>/<serverName>/chronicle/`, a sibling of barman-cloud's `base/`
 and `wals/`.
 
+chronicle is an independent project. It is not part of, endorsed by, or
+affiliated with CloudNativePG or the Cloud Native Computing Foundation.
+
 ## Status
 
 **Alpha.** All four phases work and are verified end to end against a real
@@ -344,6 +347,29 @@ If the webhook did not run at all — the plugin was installed after the cluster
 or its `MutatingWebhookConfiguration` was removed — the Pre-reconcile guard
 refuses the cluster instead of letting it come up with none of its configuration
 restored.
+
+## Installing
+
+Each [release](https://github.com/sharifmshaker/cnpg-i-chronicle/releases)
+publishes a multi-architecture image to
+`ghcr.io/sharifmshaker/cnpg-i-chronicle` and a `manifest.yaml` pinned to it.
+With cert-manager and CloudNativePG already installed:
+
+```bash
+VERSION=0.1.0   # pick one from the releases page
+kubectl apply --server-side -f \
+  "https://github.com/sharifmshaker/cnpg-i-chronicle/releases/download/v${VERSION}/manifest.yaml"
+kubectl -n cnpg-system rollout status deployment/chronicle
+```
+
+The manifest installs the CRDs, the plugin Deployment and Service, its
+cert-manager certificates, the restore webhook, and one `ClusterRole` (see
+[Permissions](#permissions)). It installs into `cnpg-system`, because the plugin
+must share the operator's namespace. If your operator runs elsewhere, render
+`kubernetes/` with that namespace instead.
+
+Image tags follow releases exactly (`0.1.0`) or by minor version (`0.1`), and
+there is no `latest`.
 
 ## Usage
 
