@@ -32,7 +32,7 @@ a way of going wrong that is not obvious, the symptom is written next to it.
 | `kubectl` | everything | `brew install kubectl` |
 | `rclone` | reading the bucket from the host | `brew install rclone` |
 | `jq` | reading snapshots and restore records | `brew install jq` |
-| `go` 1.26+ | tests, code generation | — |
+| `go`, the version in `go.mod` | tests, code generation | — |
 
 `docker buildx` also needs registering as a CLI plugin on macOS, or `docker
 buildx version` fails even after installing:

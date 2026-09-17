@@ -5,7 +5,9 @@
 # cache, so the whole dependency graph — cel-go, controller-runtime, the
 # Kubernetes libraries — recompiles from source each time. Only the module
 # download is a cached layer, and that is not where the time goes.
-FROM golang:1.26 AS builder
+# The exact patch, matching the go line in go.mod, so a release is built with
+# the same Go that CI tests with. Renovate updates both in one pull request.
+FROM golang:1.26.4 AS builder
 WORKDIR /workspace
 
 COPY go.mod go.sum ./

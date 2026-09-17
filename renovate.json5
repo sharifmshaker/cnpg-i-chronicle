@@ -10,11 +10,21 @@
   // A small project maintained a few hours a month. Batching keeps the PR
   // volume to something reviewable rather than one PR per module bump.
   schedule: ['before 6am on the first day of the month'],
+  // Later rules take precedence, so the narrower groups below override the
+  // catch-all Go modules group for the dependencies they match.
   packageRules: [
     {
       description: 'Go module updates travel together.',
       matchManagers: ['gomod'],
       groupName: 'go modules',
+    },
+    {
+      description: 'The Kubernetes libraries and controller-runtime move as one, apart from other modules, so a jump that has to wait does not hold everything else back.',
+      matchPackageNames: [
+        'k8s.io/**',
+        'sigs.k8s.io/controller-runtime',
+      ],
+      groupName: 'kubernetes',
     },
     {
       description: 'CloudNativePG APIs and the CNPG-I protocol gate compatibility, so they get a pull request of their own rather than riding along with other modules.',
@@ -24,10 +34,15 @@
       groupName: 'cloudnative-pg',
     },
     {
-      description: 'The Go toolchain in go.mod is a deliberate choice, not a dependency.',
+      description: 'Renovate leaves the go directive in go.mod alone unless told to bump it.',
       matchManagers: ['gomod'],
       matchDepTypes: ['golang'],
-      enabled: false,
+      rangeStrategy: 'bump',
+    },
+    {
+      description: 'The Go version in go.mod, which CI tests with, and the builder image in the Dockerfile, which releases are built with, change in the same pull request, so what ships is what was tested.',
+      matchDepNames: ['go', 'golang'],
+      groupName: 'go toolchain',
     },
   ],
 }
