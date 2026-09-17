@@ -3,9 +3,10 @@
   extends: [
     'config:recommended',
     ':semanticCommitTypeAll(chore)',
-    ':automergeMinor',
-    ':automergeDigest',
   ],
+  // No automerge. Pull requests into main need an approving review, which
+  // Renovate cannot give itself, so every update is approved by hand.
+  //
   // A small project maintained a few hours a month. Batching keeps the PR
   // volume to something reviewable rather than one PR per module bump.
   schedule: ['before 6am on the first day of the month'],
@@ -16,12 +17,11 @@
       groupName: 'go modules',
     },
     {
-      description: 'CloudNativePG APIs and the CNPG-I protocol gate compatibility. Review these by hand.',
+      description: 'CloudNativePG APIs and the CNPG-I protocol gate compatibility, so they get a pull request of their own rather than riding along with other modules.',
       matchPackageNames: [
         'github.com/cloudnative-pg/**',
       ],
       groupName: 'cloudnative-pg',
-      automerge: false,
     },
     {
       description: 'The Go toolchain in go.mod is a deliberate choice, not a dependency.',
