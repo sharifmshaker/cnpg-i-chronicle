@@ -7,7 +7,7 @@
 # download is a cached layer, and that is not where the time goes.
 # The exact patch, matching the go line in go.mod, so a release is built with
 # the same Go that CI tests with. Renovate updates both in one pull request.
-FROM golang:1.26.4 AS builder
+FROM golang:1.27.3 AS builder
 WORKDIR /workspace
 
 COPY go.mod go.sum ./
