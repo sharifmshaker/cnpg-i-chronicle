@@ -1,6 +1,6 @@
 module github.com/sharifmshaker/cnpg-i-chronicle
 
-go 1.26.4
+go 1.27.3
 
 require (
 	cel.dev/cel-go v0.32.0
